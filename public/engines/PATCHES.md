@@ -5,10 +5,11 @@ These files come from **SwiftLaTeX** release `v20022022` (<https://github.com/Sw
 | File | Origin |
 |---|---|
 | `swiftlatexxetex.wasm`, `swiftlatexdvipdfm.wasm` | unmodified |
-| `swiftlatexxetex.js`, `swiftlatexdvipdfm.js` | patched, see 3 below |
-| `XeTeXEngine.js`, `DvipdfmxEngine.js` | patched, see 1 and 2 below |
+| `swiftlatexxetex.wasm`, `swiftlatexdvipdfm.wasm` | unmodified |
+| `swiftlatexxetex.js`, `swiftlatexdvipdfm.js` | patched, see 3, 6 and 7 below |
+| `XeTeXEngine.js`, `DvipdfmxEngine.js` | patched, see 1, 2, 4 and 5 below |
 
-Every patch below was found by running the engines, not by reading the source. Three are upstream defects.
+Every patch below was found by running the engines, not by reading the source. Three are upstream defects (1, 2 and the `fileid` half of 3); the rest are adaptations needed to serve the engines as static assets from our own origin.
 
 ## 1. `setTexliveEndpoint` permanently disabled the engine
 
@@ -54,7 +55,7 @@ Upstream requests `{endpoint}xetex/{kpathsea-format}/{filename}` and reads a cus
 
 This is what allows `public/texlive/` to be plain static assets on a CDN.
 
-**Consequence to know about:** flattening the path discards the format hint that disambiguates extensionless requests such as `cmr10` (meaning `cmr10.tfm`). `scripts/build-texlive-bundle.ts` therefore writes files under the exact names the engine asks for, and fails loudly on a basename collision rather than silently overwriting.
+**Consequence to know about:** flattening the path discards the format *segment* that disambiguates extensionless requests such as `cmr10` (meaning `cmr10.tfm`). That cost a real bug — see 7, which recovers the same information from the format number the engine passes to JS anyway. `scripts/build-texlive-bundle.ts` also writes files under the exact names the engine asks for, and fails loudly on a basename collision rather than silently overwriting.
 
 ## 4. Added an ES module export
 
@@ -65,6 +66,42 @@ export { XeTeXEngine };     // and: export { DvipdfmxEngine };
 ```
 
 lets `compile.worker.ts` load them with a dynamic `import()`. Module scope fixes the collision natively, and it avoids evaluating fetched source, so galley needs no `unsafe-eval` in its CSP.
+
+## 5. The worker path was resolved relative to the document
+
+Both drivers spawn their worker with a bare filename:
+
+```js
+-  this.latexWorker = new Worker('swiftlatexxetex.js');
++  this.latexWorker = new Worker(ENGINE_PATH);   // '/engines/swiftlatexxetex.js'
+```
+
+A bare specifier resolves against the *document* URL, so the engine loaded from `/`, failed from `/anything/else`, and the failure looked like a missing file rather than a path bug. An absolute path is the only form that holds wherever the app is mounted.
+
+## 6. A missing file was served as the application's own HTML
+
+Not an engine bug — a consequence of hosting the tree as static assets. A single-page host answers an unknown path with `index.html` and **HTTP 200**, so the engine cached a page of HTML under a font's name and TeX then choked on it, far from the cause. The resolver now inspects the first bytes and treats an HTML response as a miss:
+
+```js
+const _hh = String.fromCharCode.apply(null, new Uint8Array(_x.response.slice(0, 14))).toLowerCase();
+if (_hh.startsWith("<!doctype html") || _hh.startsWith("<html")) continue;
+```
+
+A clean miss is always better than a wrong file: TeX handles an absent optional file by itself, but cannot recover from a corrupt one.
+
+## 7. Extensions were guessed instead of derived from the format
+
+The first attempt at recovering what 3 discarded tried extensions in a fixed order, which silently substitutes across incompatible types — `cmex10.tfm` and `cmex10.vf` are different files sharing a stem, and handing dvipdfmx metrics where it asked for a virtual font produced `VF file ended prematurely`.
+
+Reading the engine's own C settles it: `kpse_find_file` in `kpseemu.c` tries the local filesystem, then calls `kpse_find_file_js(name, format, must_exist)` — **the format number was always passed to JS**; flattening the URL merely stopped it being used. The resolver now maps format → extension from a table generated out of `kpseemu.h`'s enum order and `kpseemu.c`'s `fix_extension` switch, so it is the same mapping the C side uses:
+
+```js
+const _FMT_EXT = { 0:".gf", 1:".pk", 3:".tfm", …, 33:".vf", …, 47:".otf", … };
+const _ext = _FMT_EXT[format];
+const _cands = reqname.indexOf(".") >= 0 ? [reqname] : _ext ? [reqname + _ext] : [reqname];
+```
+
+Generated rather than transcribed, deliberately — including upstream's own quirk that `kpse_cmap_format` appends `cmap` with no leading dot. A virtual-font request now resolves to `.vf`, misses cleanly, and never receives metrics in its place.
 
 ## Rebuilding the format
 
