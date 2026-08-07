@@ -1,0 +1,254 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Theme derived from the logomark: a deep-teal draft sheet resolving into a
+   chartreuse typeset sheet. Teal takes --primary because it is contrast-safe
+   under white text; the five chart tokens walk the gradient (178 → 152 → 124 →
+   99 → 66).
+
+   --accent is NOT the brand accent. In shadcn's token system it is the neutral
+   hover surface for ghost and outline buttons, select items and menu rows, so
+   putting chartreuse there turns every hover state acid-bright. It stays a
+   subtly teal-tinted neutral; the chartreuse lives in --brand for deliberate
+   use.
+
+   Values are wrapped in hsl() so they resolve under Tailwind v4's `@theme inline`
+   mapping, which uses var(--token) directly rather than hsl(var(--token)). */
+:root {
+  --radius: 0.5rem;
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(180 20% 8%);
+  --card: hsl(180 20% 99%);
+  --card-foreground: hsl(180 20% 8%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(180 20% 8%);
+  --primary: hsl(178 90% 27%);
+  --primary-foreground: hsl(0 0% 100%);
+  --secondary: hsl(180 25% 95%);
+  --secondary-foreground: hsl(180 20% 18%);
+  --muted: hsl(180 20% 96%);
+  --muted-foreground: hsl(180 8% 45%);
+  --accent: hsl(180 25% 94%);
+  --accent-foreground: hsl(180 20% 18%);
+  --brand: hsl(72 85% 42%);
+  --brand-foreground: hsl(180 25% 10%);
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(180 18% 90%);
+  --input: hsl(180 18% 90%);
+  --ring: hsl(178 90% 27%);
+  --chart-1: hsl(178 90% 30%);
+  --chart-2: hsl(152 80% 34%);
+  --chart-3: hsl(124 58% 44%);
+  --chart-4: hsl(99 61% 48%);
+  --chart-5: hsl(66 85% 42%);
+}
+
+.dark {
+  --background: hsl(180 25% 5%);
+  --foreground: hsl(180 12% 96%);
+  --card: hsl(180 24% 8%);
+  --card-foreground: hsl(180 12% 96%);
+  --popover: hsl(180 24% 8%);
+  --popover-foreground: hsl(180 12% 96%);
+  --primary: hsl(178 70% 45%);
+  --primary-foreground: hsl(180 30% 6%);
+  --secondary: hsl(180 22% 15%);
+  --secondary-foreground: hsl(180 12% 88%);
+  --muted: hsl(180 22% 15%);
+  --muted-foreground: hsl(180 10% 60%);
+  --accent: hsl(180 22% 18%);
+  --accent-foreground: hsl(180 12% 92%);
+  --brand: hsl(72 90% 55%);
+  --brand-foreground: hsl(180 30% 6%);
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(180 22% 20%);
+  --input: hsl(180 22% 20%);
+  --ring: hsl(178 70% 45%);
+  --chart-1: hsl(178 70% 50%);
+  --chart-2: hsl(152 65% 50%);
+  --chart-3: hsl(124 55% 55%);
+  --chart-4: hsl(99 60% 58%);
+  --chart-5: hsl(66 90% 55%);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ---- Editor -------------------------------------------------------------
+   Tailwind's preflight resets headings and lists to look exactly like body
+   text, so a rich editor without these rules renders structurally correct
+   content that looks like a plain textarea. These styles are what make the
+   structure visible; they are not decoration.
+
+   Deliberately restrained: this is a writing surface, not a preview of the
+   PDF. Anything suggesting it were a preview would be a lie, since the actual
+   typesetting happens in LaTeX with entirely different metrics. */
+@layer components {
+  .prose-editor {
+    @apply text-foreground;
+  }
+  .prose-editor:focus {
+    @apply outline-none;
+  }
+
+  /* Images are shown as a marker, never fetched — see editor/image.ts. Styled
+     to read as a placeholder rather than as failed content. */
+  .prose-editor .image-placeholder {
+    @apply my-4 rounded-md border border-dashed px-3 py-2 text-muted-foreground text-xs;
+  }
+
+  .prose-editor h1 {
+    @apply mt-8 mb-3 font-semibold text-2xl tracking-tight first:mt-0;
+  }
+  .prose-editor h2 {
+    @apply mt-7 mb-2.5 font-semibold text-xl tracking-tight first:mt-0;
+  }
+  .prose-editor h3 {
+    @apply mt-6 mb-2 font-semibold text-lg first:mt-0;
+  }
+  .prose-editor h4,
+  .prose-editor h5,
+  .prose-editor h6 {
+    @apply mt-5 mb-2 font-semibold text-base first:mt-0;
+  }
+
+  .prose-editor p {
+    @apply my-3 leading-relaxed;
+  }
+
+  .prose-editor ul {
+    @apply my-3 list-disc space-y-1 pl-6;
+  }
+  .prose-editor ol {
+    @apply my-3 list-decimal space-y-1 pl-6;
+  }
+  .prose-editor li p {
+    @apply my-0;
+  }
+  .prose-editor li::marker {
+    @apply text-muted-foreground;
+  }
+
+  /* Task lists carry their own checkbox, so the disc would be a second marker. */
+  .prose-editor ul[data-type='taskList'] {
+    @apply list-none pl-0;
+  }
+  .prose-editor ul[data-type='taskList'] li {
+    @apply flex items-start gap-2;
+  }
+  .prose-editor ul[data-type='taskList'] li > label {
+    @apply mt-1 shrink-0;
+  }
+
+  .prose-editor blockquote {
+    @apply my-4 border-primary/40 border-l-2 pl-4 text-muted-foreground italic;
+  }
+
+  .prose-editor pre {
+    @apply my-4 overflow-x-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed;
+  }
+  .prose-editor :not(pre) > code {
+    @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.85em];
+  }
+
+  .prose-editor hr {
+    @apply my-6 border-border border-t;
+  }
+
+  .prose-editor a {
+    @apply text-primary underline underline-offset-2;
+  }
+
+  .prose-editor table {
+    @apply my-4 w-full border-collapse text-sm;
+  }
+  .prose-editor th,
+  .prose-editor td {
+    @apply border border-border px-2 py-1 text-left align-top;
+  }
+  .prose-editor th {
+    @apply bg-muted/50 font-semibold;
+  }
+
+  /* The placeholder only belongs on a genuinely empty document. */
+  .prose-editor p.is-editor-empty:first-child::before {
+    @apply pointer-events-none float-left h-0 text-muted-foreground;
+    content: attr(data-placeholder);
+  }
+}
+
+/* ---- Scrollbars ---------------------------------------------------------
+   The browser default is a light grey bar that ignores the theme entirely and
+   reads as a foreign element on a dark background. Styled for both engines:
+   `scrollbar-color` covers Firefox, the ::-webkit- rules cover Chromium and
+   WebKit. Kept subtle — a scrollbar should be findable, not decorative. */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border: 2px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }],
+  "compilerOptions": {
+    // Duplicated from tsconfig.app.json purely so tooling that reads the root
+    // config can resolve the alias. The shadcn CLI does, and without this it
+    // writes components into a literal "@/" directory at the repo root instead
+    // of into src/. Compiles nothing itself — "files" is empty.
+    "paths": { "@/*": ["./src/*"] }
+  }
+}
