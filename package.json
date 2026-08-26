@@ -1,7 +1,7 @@
 {
   "name": "galley",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Markdown in, a typeset PDF and the LaTeX that made it out — compiled by a real TeX engine entirely in the browser.",
   "license": "AGPL-3.0-or-later",
   "homepage": "https://galley.valeon.blog",
