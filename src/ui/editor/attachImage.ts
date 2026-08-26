@@ -45,13 +45,35 @@ export async function attachImage(
   return { ok: true, name: image.name }
 }
 
-/** Image files from a drop or paste, ignoring anything that is not one. */
+/**
+ * Whether a dropped or pasted file is an attempt at a figure.
+ *
+ * MIME type first, because that is what a paste supplies and a screenshot has
+ * no useful name. `application/pdf` has to be named explicitly: a PDF IS a
+ * supported figure, but it is not `image/*`, and without this it falls through
+ * to the "open it as the document" branch and replaces the manuscript with its
+ * own bytes as text.
+ *
+ * A file with no MIME type at all — some file managers supply none — falls back
+ * to what the name says. An unsupported image type still counts as an attempt,
+ * so `attachImage` can refuse it by name rather than the caller silently
+ * treating a picture as prose.
+ */
+export function looksLikeFigure(file: File): boolean {
+  if (file.type.startsWith('image/')) return true
+  if (file.type === 'application/pdf') return true
+  return (
+    file.type === '' && classifyImage(sanitizeImageName(file.name)).kind === 'supported'
+  )
+}
+
+/** Figure candidates from a drop or paste, ignoring anything that is not one. */
 export function imageFilesFrom(list: FileList | DataTransferItemList | null): File[] {
   if (!list) return []
   const files: File[] = []
   for (const entry of Array.from(list as ArrayLike<File | DataTransferItem>)) {
     const file = 'getAsFile' in entry ? entry.getAsFile() : entry
-    if (file?.type.startsWith('image/')) files.push(file)
+    if (file && looksLikeFigure(file)) files.push(file)
   }
   return files
 }

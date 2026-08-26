@@ -27,9 +27,22 @@ describe('slash commands', () => {
     // `year` marked a number for text-to-speech. galley typesets; it does not
     // read aloud.
     expect(ids).not.toContain('year')
-    // Images are unsupported, so an insert command for one would be a promise
-    // the renderer cannot keep.
-    expect(ids).not.toContain('image')
+  })
+
+  it('offers a figure command, now that the renderer can keep that promise', () => {
+    // This previously asserted the OPPOSITE, because images were unsupported
+    // and an insert command would have promised something the renderer could
+    // not deliver. It can now, so the guard flips rather than disappearing.
+    const image = SLASH_ITEMS.find((i) => i.id === 'image')
+    expect(image).toBeDefined()
+    // Wired through a real editor command, not an event nothing listens for —
+    // the failure that left three ported commands inert.
+    expect(SOURCE).toContain('requestImage()')
+  })
+
+  it('describes the figure command in terms of what galley accepts', () => {
+    const image = SLASH_ITEMS.find((i) => i.id === 'image')
+    expect(image?.description).toMatch(/PNG/i)
   })
 
   it('describes every entry without referring to features galley lacks', () => {

@@ -75,7 +75,7 @@ export async function getImage(name: string): Promise<ArrayBuffer | null> {
   return value ?? null
 }
 
-export async function deleteImage(name: string): Promise<void> {
+async function deleteImage(name: string): Promise<void> {
   await run('readwrite', (s) => s.delete(name))
 }
 
@@ -102,7 +102,12 @@ export async function loadImages(
   return found
 }
 
-/** Drop anything the document no longer refers to, so the store cannot grow forever. */
+/**
+ * Drop everything except the names given.
+ *
+ * Called with an empty list when the reader clears the document, which orphans
+ * every attached figure at once. Without it the store only ever grows.
+ */
 export async function pruneImages(keep: readonly string[]): Promise<void> {
   const names = await listImageNames()
   const wanted = new Set(keep)

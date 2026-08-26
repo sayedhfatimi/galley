@@ -7,6 +7,7 @@ import {
   Code,
   Code2,
   FileUp,
+  ImagePlus,
   Italic,
   Link as LinkIcon,
   List,
@@ -201,6 +202,12 @@ export function Toolbar({
       />
 
       <Separator orientation="vertical" className="mx-1 h-5" />
+
+      <ToolbarButton
+        icon={<ImagePlus className="size-4" />}
+        label="Add a figure"
+        onClick={() => chain().requestImage().run()}
+      />
 
       <ToolbarButton
         icon={<Quote className="size-4" />}

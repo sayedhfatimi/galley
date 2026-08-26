@@ -1,5 +1,5 @@
 import { mergeAttributes, Node } from '@tiptap/core'
-import { classifyImage } from '@/core/images'
+import { classifyImage, isPreviewable } from '@/core/images'
 import { getImage } from '@/ui/lib/imageStore'
 
 /**
@@ -60,16 +60,26 @@ export const ImagePlaceholder = Node.create({
 
       let objectUrl: string | null = null
       const image = classifyImage(src ?? '')
-      if (image.kind === 'supported') {
+      // A PDF is a valid figure that no browser can draw in an <img>, so it
+      // keeps the placeholder rather than becoming an invisible empty box.
+      if (image.kind === 'supported' && isPreviewable(image.name)) {
         getImage(image.name).then((bytes) => {
           if (!bytes) return
           objectUrl = URL.createObjectURL(new Blob([bytes]))
           const img = document.createElement('img')
-          img.src = objectUrl
-          img.alt = alt ?? ''
           img.className = 'image-preview'
-          dom.replaceChildren(img)
-          dom.classList.remove('image-placeholder')
+          img.alt = alt ?? ''
+          // If the bytes turn out not to be readable after all, fall back
+          // rather than leaving a broken image where the figure should be.
+          img.onerror = () => {
+            dom.textContent = `Image: ${alt || title || src || 'image'}`
+            dom.classList.add('image-placeholder')
+          }
+          img.onload = () => {
+            dom.replaceChildren(img)
+            dom.classList.remove('image-placeholder')
+          }
+          img.src = objectUrl
         })
       }
 

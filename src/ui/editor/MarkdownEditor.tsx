@@ -15,6 +15,7 @@ import { parseMarkdown } from '@/core/markdown/parse'
 import { mdastToPm } from '@/core/markdown/pm/mdast-to-pm'
 import { serializeToMarkdown } from '@/core/markdown/pm/serialize'
 import { cn } from '@/lib/utils'
+import { pruneImages } from '@/ui/lib/imageStore'
 import { attachImage, imageFilesFrom } from './attachImage'
 import { EditorStatusBar } from './EditorStatusBar'
 import { EditorToc } from './EditorToc'
@@ -45,7 +46,21 @@ const SERIALIZE_DEBOUNCE_MS = 300
 
 /** Generous enough for a book-length manuscript in plain text, which is smaller
  *  than most people assume, while bounding the cost of any one render. */
-export const MAX_INPUT_BYTES = 2 * 1024 * 1024
+export /**
+ * Whether a file can sensibly be read as the document.
+ *
+ * Deliberately permissive about a MISSING type — plenty of sources supply none
+ * for a plain `.md` — and strict about a type that is present and is not text.
+ */
+function looksLikeText(file: File): boolean {
+  if (file.type.startsWith('text/')) return true
+  if (file.type !== '' && file.type !== 'application/octet-stream') return false
+  return /\.(md|markdown|mdown|mkd|txt)$/i.test(file.name) || file.name === ''
+}
+
+const MAX_INPUT_BYTES = 2 * 1024 * 1024
+
+const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf'
 
 const ACCEPT = '.md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain'
 
@@ -71,6 +86,7 @@ export function MarkdownEditor({
   const [link, setLink] = useState({ open: false, href: '' })
   const [fileError, setFileError] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  const imageInput = useRef<HTMLInputElement>(null)
 
   // Guards the feedback loop: the editor writes markdown up to the store, the
   // store hands it back down. Without this the document would be reparsed and
@@ -84,6 +100,7 @@ export function MarkdownEditor({
     () =>
       createExtensions({
         onRequestLink: (href) => setLink({ open: true, href }),
+        onRequestImage: () => imageInput.current?.click(),
       }),
     [],
   )
@@ -168,6 +185,16 @@ export function MarkdownEditor({
         )
         return
       }
+      // Anything that is not plausibly text would be read as text and REPLACE
+      // the manuscript with its own bytes. That is how a dropped PDF used to
+      // destroy the document; the rule is now that an unreadable file is
+      // refused rather than silently substituted for the reader's work.
+      if (!looksLikeText(file)) {
+        setFileError(
+          `${file.name || 'That file'} is not a Markdown or text file, so it has not been opened. Drop an image to add it as a figure.`,
+        )
+        return
+      }
       setFileError(null)
       onChange(await file.text())
       onFileName?.(file.name)
@@ -209,7 +236,11 @@ export function MarkdownEditor({
     onChange('')
     onFileName?.('')
     editor?.commands.clearContent(true)
-  }, [editor, onChange, onFileName])
+    // Clearing the document orphans its figures: nothing references them any
+    // more, and nothing ever will. Left alone they would sit in IndexedDB for
+    // the life of the browser profile, so this is the moment to reclaim them.
+    void pruneImages([]).then(() => onImagesChanged?.())
+  }, [editor, onChange, onFileName, onImagesChanged])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -222,6 +253,22 @@ export function MarkdownEditor({
           const file = e.target.files?.[0]
           if (file) void readFile(file)
           e.target.value = ''
+        }}
+      />
+
+      <input
+        ref={imageInput}
+        type="file"
+        accept={IMAGE_ACCEPT}
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? [])
+          // Reset first: picking the same file twice in a row fires no change
+          // event otherwise, and re-adding a figure you just removed is a
+          // perfectly ordinary thing to do.
+          e.target.value = ''
+          if (files.length > 0) void addImages(files)
         }}
       />
       <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />

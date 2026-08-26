@@ -413,7 +413,7 @@ class Serializer {
     } else {
       this.#diagnostics.add(
         'image-unsupported',
-        'That image is named by the document but has not been added. Drop or paste the file in to include it.',
+        'That image is named by the document but has not been added. Use the picture button, or drop the file in, to include it.',
         url,
       )
     }

@@ -87,3 +87,19 @@ function isSupported(ext: string): ext is SupportedImageExtension {
 export const SUPPORTED_IMAGE_LIST = SUPPORTED_IMAGE_EXTENSIONS.map((e) =>
   e.slice(1).toUpperCase(),
 ).join(', ')
+
+/**
+ * Formats a browser can draw in an `<img>`.
+ *
+ * A PDF is a perfectly good figure — XeTeX and dvipdfmx both read one — but no
+ * browser renders it in an image element. Pointing an `<img>` at PDF bytes
+ * fails to load and collapses to nothing, so the editor showed the writer an
+ * empty space where their figure was. The placeholder is kept for those.
+ */
+export const PREVIEWABLE_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg'] as const
+
+export function isPreviewable(name: string): boolean {
+  const dot = name.lastIndexOf('.')
+  const ext = dot > 0 ? name.slice(dot).toLowerCase() : ''
+  return (PREVIEWABLE_IMAGE_EXTENSIONS as readonly string[]).includes(ext)
+}

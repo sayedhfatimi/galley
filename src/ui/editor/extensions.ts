@@ -10,6 +10,7 @@ import Typography from '@tiptap/extension-typography'
 import StarterKit from '@tiptap/starter-kit'
 import { Footnote } from './footnote'
 import { ImagePlaceholder } from './image'
+import { ImagePrompt } from './image-prompt'
 import { LinkPrompt } from './link'
 import { MathBlock } from './math-block'
 import { MathInline } from './math-inline'
@@ -18,6 +19,7 @@ import { SlashCommand } from './slash-command'
 export interface EditorHandlers {
   /** Called when the toolbar or `/link` needs a URL from the reader. */
   onRequestLink?: (currentHref: string) => void
+  onRequestImage?: () => void
 }
 
 /**
@@ -33,7 +35,7 @@ export interface EditorHandlers {
  * only the mounting component has. The schema is identical either way, so tests
  * that only care about the node vocabulary can call it with no arguments.
  */
-export function createExtensions({ onRequestLink }: EditorHandlers = {}) {
+export function createExtensions({ onRequestLink, onRequestImage }: EditorHandlers = {}) {
   return [
     StarterKit.configure({
       // Supplied separately below so the mdast bridge sees the shapes it expects.
@@ -56,6 +58,7 @@ export function createExtensions({ onRequestLink }: EditorHandlers = {}) {
     ImagePlaceholder,
     SlashCommand,
     LinkPrompt.configure({ onRequest: onRequestLink ?? (() => {}) }),
+    ImagePrompt.configure({ onRequest: onRequestImage ?? (() => {}) }),
     Placeholder.configure({
       placeholder: 'Write, paste, or drop a Markdown file. Press / for commands.',
     }),

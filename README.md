@@ -109,7 +109,7 @@ document the moment you paste it, without opening the configuration at all.
 | Reference links | `[text][ref]` — resolved to ordinary links |
 | Maths | Inline `$…$` and display `$$…$$` — see below |
 | Horizontal rules | |
-| Images | Dropped or pasted in — PNG, JPEG, PDF. A lone image becomes a captioned figure |
+| Images | PNG, JPEG, PDF from your machine. A lone image becomes a captioned figure |
 | Unicode | Accented names and curly quotes typeset natively, no escaping required |
 
 Special characters that mean something to LaTeX — `# $ % & _ { } ~ ^ \` — are escaped for
@@ -154,8 +154,10 @@ edit is serialised straight back to it.
 - **Em and en dashes** — the `—` and `–` buttons, since a keyboard has neither. Typing
   `---` and `--` also works.
 - **Open a file** — the upload button, or just drag a `.md` file onto the editor.
-- **Add a figure** — drop or paste an image (PNG, JPEG, PDF). It is kept in this browser,
-  previewed in place, and set as a captioned figure using the alt text.
+- **Add a figure** — the picture button in the toolbar, the `/image` command, or just
+  drop or paste one in (PNG, JPEG, PDF). It is kept in this browser, previewed in place,
+  and set as a captioned figure using the alt text. A PDF figure keeps a placeholder in
+  the editor, since no browser can draw one in place, but it typesets normally.
 - **Help** — the `?` button lists every shortcut and slash command.
 - **Clear the document** — the bin, far right and deliberately separated from the
   formatting tools. It asks first.

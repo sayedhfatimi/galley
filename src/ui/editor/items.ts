@@ -1,6 +1,7 @@
 import type { Editor, Range } from '@tiptap/core'
 import {
   Code,
+  ImagePlus,
   Link2,
   List,
   ListOrdered,
@@ -146,6 +147,15 @@ export const SLASH_ITEMS: SlashItem[] = [
     icon: Sigma,
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).insertMathInline('').run(),
+  },
+  {
+    id: 'image',
+    title: 'Figure',
+    description: 'Add a picture — PNG, JPEG or PDF',
+    keywords: ['image', 'figure', 'picture', 'photo', 'diagram'],
+    icon: ImagePlus,
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).requestImage().run(),
   },
   {
     id: 'table',
