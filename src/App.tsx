@@ -6,6 +6,7 @@ import { MarkdownEditor } from '@/ui/editor/MarkdownEditor'
 import { useStore } from '@/ui/lib/store'
 import { useCompile } from '@/ui/lib/useCompile'
 import { ParticleBackground } from '@/ui/ParticleBackground'
+import { PrivacyNotice } from '@/ui/PrivacyNotice'
 import { ResultDialog } from '@/ui/ResultDialog'
 
 /**
@@ -83,6 +84,8 @@ export default function App() {
             <Diagnostics items={diagnostics} />
           </div>
         )}
+
+        <PrivacyNotice />
       </div>
 
       <ResultDialog compile={compile} onDownloadTex={downloadTex} />

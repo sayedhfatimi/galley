@@ -150,6 +150,7 @@ export function HelpDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const [query, setQuery] = useState('')
+  const [tab, setTab] = useState('shortcuts')
 
   const filteredShortcuts = useMemo(
     () => filterShortcuts(SHORTCUT_SECTIONS, query),
@@ -162,40 +163,50 @@ export function HelpDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Editor reference</DialogTitle>
+          <DialogTitle>Help and about</DialogTitle>
           <DialogDescription>
-            Every keyboard shortcut and slash command, in one place.
+            Every keyboard shortcut and slash command, and what galley does with your
+            work.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="shortcuts" className="flex min-h-0 flex-1 flex-col gap-4">
+        <Tabs
+          value={tab}
+          onValueChange={setTab}
+          className="flex min-h-0 flex-1 flex-col gap-4"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <TabsList>
               <TabsTrigger value="shortcuts">Shortcuts</TabsTrigger>
               <TabsTrigger value="slash">Slash commands</TabsTrigger>
+              <TabsTrigger value="about">About</TabsTrigger>
             </TabsList>
-            <div className="relative w-full sm:w-64">
-              <Search
-                className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Filter…"
-                className="h-8 pl-8 pr-8 text-sm"
-              />
-              {query ? (
-                <button
-                  type="button"
-                  onClick={() => setQuery('')}
-                  aria-label="Clear filter"
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <X className="size-3.5" aria-hidden />
-                </button>
-              ) : null}
-            </div>
+            {/* The filter drives the two reference lists; About has nothing
+                to match against, so it would sit there inert. */}
+            {tab === 'about' ? null : (
+              <div className="relative w-full sm:w-64">
+                <Search
+                  className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden
+                />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Filter…"
+                  className="h-8 pl-8 pr-8 text-sm"
+                />
+                {query ? (
+                  <button
+                    type="button"
+                    onClick={() => setQuery('')}
+                    aria-label="Clear filter"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="size-3.5" aria-hidden />
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <TabsContent value="about" className="min-h-0 flex-1 overflow-y-auto">
