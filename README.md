@@ -18,8 +18,9 @@ not. It walks the Markdown structure directly into LaTeX, so what comes out read
 book rather than a printed webpage.
 
 ```
-your Markdown ──parse──► document structure ──► LaTeX source ──► .tex download
-                                                     │
+your Markdown ──parse──► document structure ──► LaTeX source ──► source download
+                                                     │                (.tex, or .zip
+                                                     │                 with your figures)
                                                      └──► XeTeX ×2 ──► dvipdfmx ──► PDF
                                                           (in a Web Worker, on your machine)
 ```
@@ -38,10 +39,12 @@ does not lose it. That copy is on your machine and only your machine. **Clear th
 in the toolbar removes it.
 
 Two consequences worth knowing. The first render downloads the engine and the TeX Live
-files your document needs — about 25 MB of engine and format, plus whatever fonts and
-packages the document touches, to a worst case of roughly 36 MB. That happens once and is
-then cached; later renders fetch nothing. And everything is bounded by your own CPU rather
-than by a queue, with a 60-second ceiling on any single compile.
+files your document needs. That is about 26 MB of engine and format before anything else,
+plus whatever fonts and packages your document actually touches: measured, a plain article
+comes to roughly 35 MB and a book with maths, tables and a non-default typeface to roughly
+38 MB. Only the typeface you choose is fetched, so the others cost you nothing. It happens
+once and is then cached; later renders fetch nothing. And everything is bounded by your own
+CPU rather than by a queue, with a 60-second ceiling on any single compile.
 
 ## Quick start
 
@@ -138,6 +141,42 @@ its raw TeX; move away and it renders. The **Σ** button in the toolbar opens a 
 catalogue of 102 symbols across Greek, operators, relations, logic, structures and
 functions, if you would rather not remember the command.
 
+### Figures
+
+Images come from files on your machine. There are four ways in, and they all do the same
+thing: the picture button in the toolbar, the `/image` command, dropping a file onto the
+editor, or pasting one from the clipboard.
+
+**PNG, JPEG and PDF.** A PDF figure is worth knowing about — it stays vector, so a chart or
+a diagram exported from almost any tool prints crisply at any size. Anything else is
+refused by name rather than silently producing a broken document.
+
+**An image on its own line becomes a figure**, centred, with its alt text as the caption:
+
+```markdown
+![The growth of the archive, 1997–2026](archive-growth.png)
+```
+
+An image used *inside* a sentence stays inline instead, with no caption and no float,
+because a figure opened mid-paragraph would reorder the prose around it. Figures are
+capped at the width of the text block, so an oversized one is scaled rather than running
+into the margin.
+
+**A referenced image is never fetched.** If your Markdown points at
+`https://example.com/chart.png`, galley will not download it — reaching the network on
+behalf of a document you merely pasted in is the one thing running everything locally
+exists to prevent. The gap is marked in the output and a notice tells you which reference
+it was. The same is true in the editor: an attached file previews in place, a URL keeps a
+placeholder. A PDF also keeps its placeholder, since no browser can draw one in an image
+element, but it typesets normally.
+
+**Your files stay in your browser**, alongside the document, so closing the tab and coming
+back does not lose them. Clearing the document clears them too.
+
+A document that names an image you have not added still renders — the figure is marked as
+missing rather than stopping the whole document, which is what a manuscript written
+elsewhere and pasted in will do every time.
+
 ## The editor
 
 The writing surface is a rich editor, but **Markdown is always the real document** — every
@@ -219,8 +258,9 @@ Outside, top and bottom must be at least 0.25 in; galley uses 0.5 in, because th
 is what the printer accepts rather than what reads well. Combine it with a KDP trim size —
 A5, Digest, US Trade and US Letter are all KDP sizes.
 
-Bleed is deliberately not offered. It only matters when artwork runs to the edge of the
-page, and galley does not place images.
+Bleed is deliberately not offered. It only matters when artwork runs past the edge of the
+page, and every figure galley sets is placed inside the text block — nothing it produces
+reaches the trim edge.
 
 A clean render is not a promise that KDP will accept your upload — it means the stated
 minimums are met.
@@ -242,6 +282,13 @@ The `.tex` is standard LaTeX and compiles with any XeLaTeX installation:
 
 ```bash
 xelatex your-document.tex
+```
+
+From a zip, unpack it first and compile in the same directory — the images sit beside the
+`.tex` under the names it references, so nothing needs rewriting:
+
+```bash
+unzip your-document.zip && xelatex your-document.tex
 ```
 
 ## Limits and known gaps
@@ -284,20 +331,33 @@ Run all four checks before committing.
 src/core/       pure — no DOM, no React; runs identically in Node, the main thread and the worker
   markdown/     Markdown → structure, and the bridge between it and the editor
   latex/        structure → LaTeX: escaping, preamble, serialisation
+  fonts.ts      the typeface registry — the one place face filenames are written down
+  images.ts     which images can be typeset, and the single sanitised name for each
+  zip.ts        the source-plus-figures archive
   kdp.ts        print requirements and the post-render compliance check
 src/ui/         React: the shell, the configuration dialog, the editor
+  lib/          the store, the compile lifecycle, and the IndexedDB figure store
 src/workers/    the sole owner of the TeX engines
 public/texlive/ the bundled TeX Live file set
 public/engines/ the vendored WASM engines, with every modification documented in PATCHES.md
-scripts/        maintainer-only bundle builder
+scripts/        maintainer-only builders — see scripts/README.md
 ```
 
 `src/core` being DOM-free is load-bearing: the conversion is unit-tested in Node, and the
 same code runs in the worker.
 
 The TeX Live tree is a **closed set** — because you cannot inject a preamble or request
-packages, the reachable files are finite and can be bundled. `scripts/build-texlive-bundle.ts`
-regenerates it and is only needed if the preamble grows a package.
+packages, the reachable files are finite and can be bundled. The typeface menu is a fixed
+list for the same reason: five bundled pairings keep the set enumerable, where an arbitrary
+user-supplied font would not. `scripts/build-texlive-bundle.ts` regenerates the tree and is
+needed if the preamble grows a package or the registry grows a face; it also compiles a
+probe document per typeface, so a face that cannot be loaded fails the build rather than a
+reader's browser.
+
+`swiftlatexxetex.fmt` is a separate artefact that this script cannot produce — a format
+file must be built by the engine that reads it. `scripts/build-format.ts` does that, and
+`scripts/README.md` explains why it runs in a browser and why it does not install its own
+output.
 
 **Stack:** Vite, React, TypeScript, Tailwind, shadcn/ui, TipTap, Zustand, MathJax, Vitest,
 Biome, and SwiftLaTeX's XeTeX + dvipdfmx compiled to WebAssembly.
