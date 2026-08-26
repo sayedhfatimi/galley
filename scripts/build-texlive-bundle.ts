@@ -34,7 +34,8 @@ import {
 } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import type { DocumentCharacter, FontSize, GalleyConfig } from '../src/core/config'
-import { presetFor } from '../src/core/config'
+import { DEFAULT_CONFIG, presetFor } from '../src/core/config'
+import { allFontFiles, TYPEFACE_NAMES } from '../src/core/fonts'
 import { convert, readFrontmatter } from '../src/core/latex/document'
 
 const ROOT = resolve(import.meta.dirname, '..')
@@ -72,20 +73,15 @@ const MATH_FAMILIES = [
 ]
 const MATH_SIZES = [5, 6, 7, 8, 9, 10, 12, 17]
 
-/** Font faces referenced by the preamble. Never harvested — see the header. */
-const FONTS = [
-  'lmroman10-regular.otf',
-  'lmroman10-bold.otf',
-  'lmroman10-italic.otf',
-  'lmroman10-bolditalic.otf',
-  'lmsans10-regular.otf',
-  'lmsans10-bold.otf',
-  'lmsans10-oblique.otf',
-  'lmsans10-boldoblique.otf',
-  'lmmono10-regular.otf',
-  'lmmono10-italic.otf',
-  'lmmonolt10-bold.otf',
-]
+/**
+ * Font faces referenced by the preamble. Never harvested — see the header.
+ *
+ * Taken from the typeface registry rather than restated here, so that adding a
+ * face to the menu cannot leave the bundle behind. Every typeface's faces are
+ * bundled, not just the default one: a reader fetches only the files their
+ * choice needs, but the build cannot know which choice that will be.
+ */
+const FONTS = allFontFiles()
 
 /**
  * The mapping that `Ligatures=TeX` applies. It is loaded by XeTeX's font
@@ -189,6 +185,45 @@ function main() {
         )
       }
     }
+  }
+
+  // One probe per non-default typeface, so every face in the menu is proven to
+  // COMPILE here rather than merely to be present in the bundle. The
+  // preamble test can only check that a named file was shipped; a face that
+  // fontspec cannot load fails in the reader's browser with no PDF at all.
+  //
+  // Deliberately not a fourth axis on the matrix above: crossing five
+  // typefaces with the existing eighteen documents would mean ninety
+  // compilations to prove something a single document per face already proves.
+  for (const typeface of TYPEFACE_NAMES) {
+    if (typeface === DEFAULT_CONFIG.typeface) continue
+    const config = { ...presetFor('article'), typeface, metadata }
+    const name = `probe-typeface-${typeface}`
+    writeFileSync(join(WORK, `${name}.tex`), convert(source, config).tex)
+    try {
+      execFileSync('xelatex', ['-interaction=nonstopmode', '-recorder', `${name}.tex`], {
+        cwd: WORK,
+        stdio: 'ignore',
+      })
+    } catch {
+      // nonstopmode exits non-zero on warnings; the log is what matters.
+    }
+    const log = readFileSync(join(WORK, `${name}.log`), 'utf8')
+    const errors = log.split('\n').filter((l) => l.startsWith('!'))
+    if (errors.length > 0) {
+      console.error(`Typeface "${typeface}" did not compile:`)
+      for (const e of errors.slice(0, 5)) console.error(`  ${e}`)
+      process.exit(1)
+    }
+    const fls = readFileSync(join(WORK, `${name}.fls`), 'utf8')
+    inputs.push(
+      ...fls
+        .split('\n')
+        .filter((l) => l.startsWith('INPUT '))
+        .map((l) => l.slice(6).trim())
+        .filter((f) => f.startsWith('/') && existsSync(f))
+        .filter((f) => !f.endsWith('xelatex.fmt')),
+    )
   }
 
   const sources = [...new Set(inputs)]

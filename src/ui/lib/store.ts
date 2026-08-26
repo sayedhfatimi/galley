@@ -145,6 +145,30 @@ export const safeStorage = {
   },
 }
 
+/**
+ * Layer a persisted state over the current defaults.
+ *
+ * Zustand's default merge is shallow, so a persisted `config` REPLACES
+ * `DEFAULT_CONFIG` wholesale rather than layering over it. Every field added to
+ * the config after a reader's last visit would therefore arrive `undefined` —
+ * a break that only ever shows up for returning users and never in a fresh
+ * browser, which is exactly the class of bug a test in a clean jsdom cannot see.
+ *
+ * Merging one level into `config` is version-independent, so it protects
+ * fields added later as well as the ones added now. It does NOT reach inside
+ * the nested objects (`toc`, `chapters`, `margins`, `metadata`): a field added
+ * *within* one of those would reintroduce the same problem and would need
+ * handling here.
+ */
+export function mergePersisted(persisted: unknown, current: GalleyStore): GalleyStore {
+  const saved = (persisted ?? {}) as Partial<GalleyStore>
+  return {
+    ...current,
+    ...saved,
+    config: { ...current.config, ...(saved.config ?? {}) },
+  }
+}
+
 export const useStore = create<GalleyStore>()(
   persist(
     (set) => ({
@@ -170,8 +194,16 @@ export const useStore = create<GalleyStore>()(
     }),
     {
       name: 'galley',
+      // Deliberately still 1. Bumping it without also supplying `migrate` makes
+      // zustand DISCARD the stored state outright — "State loaded from storage
+      // couldn't be migrated since no migrate function was provided" — which
+      // would throw away the reader's manuscript on upgrade, a far worse bug
+      // than the one `merge` below exists to fix. The version is for breaking
+      // shape changes that need transforming; adding an optional field with a
+      // default is not one, and `merge` handles it without a version at all.
       version: 1,
       partialize: persistedSlice,
+      merge: (persisted, current) => mergePersisted(persisted, current),
       storage: {
         getItem: (name) => {
           const raw = safeStorage.getItem(name)

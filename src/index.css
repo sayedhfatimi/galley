@@ -252,3 +252,43 @@
     background: transparent;
   }
 }
+
+/*
+ * Typeface previews for the document-setup menu.
+ *
+ * Drawn with the REAL font file the document will be set in — the same OTF the
+ * TeX engine fetches from the bundled tree — rather than a web-font lookalike,
+ * so the menu cannot show something the PDF will not deliver. A browser
+ * downloads a face only when text actually uses it, so none of these are
+ * fetched until the typeface menu is opened. Kept in step with `core/fonts.ts`
+ * by `fonts.test.ts`.
+ */
+@font-face {
+  font-family: "galley-preview-latin-modern";
+  src: url("/texlive/lmroman10-regular.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "galley-preview-pagella";
+  src: url("/texlive/texgyrepagella-regular.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "galley-preview-termes";
+  src: url("/texlive/texgyretermes-regular.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "galley-preview-schola";
+  src: url("/texlive/texgyreschola-regular.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "galley-preview-bonum";
+  src: url("/texlive/texgyrebonum-regular.otf") format("opentype");
+  font-display: swap;
+}

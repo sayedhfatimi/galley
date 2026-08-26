@@ -21,6 +21,7 @@ import {
   presetFor,
   usesChapters,
 } from '@/core/config'
+import { previewFamily, TYPEFACE_NAMES, TYPEFACES, type TypefaceName } from '@/core/fonts'
 import { GUTTER_BANDS, kdpMargins } from '@/core/kdp'
 
 /**
@@ -171,8 +172,10 @@ export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
   const paperName = config.paper.kind === 'named' ? config.paper.name : 'a4'
 
   return (
+    // min-w-0: a Select renders the chosen item's hint in its trigger, and a
+    // long one would otherwise push its grid column past an even half.
     <div className="grid gap-5 sm:grid-cols-2 sm:gap-x-8">
-      <div className="grid content-start gap-5">
+      <div className="grid min-w-0 content-start gap-5">
         <Field label="What are you making?">
           <Select
             value={config.character}
@@ -219,7 +222,40 @@ export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
           </Select>
         </Field>
 
-        <div className="grid grid-cols-2 gap-3">
+        <Field label="Typeface">
+          <Select
+            value={config.typeface}
+            onValueChange={(v) => set('typeface', v as TypefaceName)}
+          >
+            <SelectTrigger className="h-auto w-full py-2">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TYPEFACE_NAMES.map((name) => (
+                <SelectItem key={name} value={name}>
+                  <span className="flex flex-col items-start">
+                    {/* Set in the face itself, so the choice is visible rather
+                        than merely named. */}
+                    <span
+                      className="text-base"
+                      style={{ fontFamily: `"${previewFamily(name)}", serif` }}
+                    >
+                      {TYPEFACES[name].label}
+                    </span>
+                    <span className="text-muted-foreground text-xs">
+                      {TYPEFACES[name].hint}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1.5 text-muted-foreground text-xs">
+            Mathematics is always set in Computer Modern.
+          </p>
+        </Field>
+
+        <div className="grid min-w-0 grid-cols-2 gap-3">
           <Field label="Text size">
             <Select
               value={String(config.fontSize)}
@@ -309,7 +345,7 @@ export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
         )}
       </div>
 
-      <div className="grid content-start gap-3">
+      <div className="grid min-w-0 content-start gap-3">
         <KdpPreset config={config} onChange={onChange} />
 
         <Separator />

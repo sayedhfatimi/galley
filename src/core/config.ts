@@ -8,6 +8,8 @@
  */
 
 /** What the reader is making, in their terms rather than LaTeX's. */
+import { DEFAULT_TYPEFACE, type TypefaceName } from './fonts'
+
 export type DocumentCharacter = 'article' | 'report' | 'book'
 
 export type LengthUnit = 'mm' | 'in'
@@ -74,6 +76,12 @@ export interface GalleyConfig {
   /** Alternates margins and differentiates running heads on facing pages. */
   twoSided: boolean
   fontSize: FontSize
+  /**
+   * The face the document is set in. Chosen from a fixed menu rather than
+   * freely, so the set of files the bundle must ship stays finite — see
+   * `fonts.ts`. Latin Modern is the default and the only one without Greek.
+   */
+  typeface: TypefaceName
   lineSpacing: LineSpacing
   toc: { include: boolean; depth: number }
   /** Only meaningful when top-level headings become chapters. */
@@ -120,6 +128,7 @@ export const DEFAULT_CONFIG: GalleyConfig = {
   margins: { top: 25, bottom: 25, inner: 25, outer: 25, unit: 'mm' },
   twoSided: false,
   fontSize: 11,
+  typeface: DEFAULT_TYPEFACE,
   lineSpacing: 'single',
   toc: { include: false, depth: 2 },
   chapters: { startOnNewPage: true, forceRecto: false },

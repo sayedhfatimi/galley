@@ -22,6 +22,7 @@ import type {
 } from 'mdast'
 import { type DocumentCharacter, type GalleyConfig, usesChapters } from '../config'
 import { type Diagnostic, DiagnosticCollector } from '../diagnostics'
+import { findScriptGaps, typefaceOrDefault, typefacesWithGreek } from '../fonts'
 import { escapeText, escapeUrl, isVerbatimSafe } from './escape'
 
 export interface SerializeResult {
@@ -238,6 +239,7 @@ class Serializer {
   #inlineNode(node: RootContent): string {
     switch (node.type) {
       case 'text':
+        this.#checkGlyphs(node.value)
         return escapeText(node.value)
       case 'emphasis':
         return `\\emph{${this.#inline(node.children)}}`
@@ -281,6 +283,19 @@ class Serializer {
           : 'value' in node
             ? escapeText(String(node.value))
             : ''
+    }
+  }
+
+  /**
+   * Text XeTeX will silently drop, because no face in the chosen typeface can
+   * draw it. Reported rather than left to be discovered in the finished PDF.
+   */
+  #checkGlyphs(value: string): void {
+    for (const gap of findScriptGaps(value, typefaceOrDefault(this.#config.typeface))) {
+      const message = gap.fixable
+        ? `${gap.script} text needs a typeface that covers it. Try ${typefacesWithGreek().join(', ')}.`
+        : `${gap.script} text cannot be typeset — no bundled typeface covers it.`
+      this.#diagnostics.add('missing-glyphs', message, gap.sample)
     }
   }
 

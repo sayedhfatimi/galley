@@ -2,6 +2,7 @@ import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type GalleyConfig, presetFor } from '../config'
+import { allFontFiles, TYPEFACE_NAMES } from '../fonts'
 import { buildPreamble } from './preamble'
 
 const cfg = (over: Partial<GalleyConfig> = {}): GalleyConfig => ({
@@ -171,14 +172,41 @@ describe('buildPreamble', () => {
   // render, it is a hard stop: XeTeX reports "Font ... not loadable" and no PDF
   // is produced. That is how the sans family was missed — nothing selects it
   // from Markdown, so only \mathsf reached it, and only in a compiled document.
-  it('names only fonts that the bundle actually ships', () => {
+  // Every typeface in the menu, not just the default: a reader can select any
+  // of them, and a face missing from the bundle fails only in their browser.
+  it.each(TYPEFACE_NAMES)('names only fonts the bundle ships (%s)', (typeface) => {
     const bundle = join(import.meta.dirname, '../../../public/texlive')
     const shipped = new Set(readdirSync(bundle))
     const named = new Set(
-      [...buildPreamble(cfg()).matchAll(/[\w-]+\.otf/g)].map((m) => m[0]),
+      [...buildPreamble(cfg({ typeface })).matchAll(/[\w-]+\.otf/g)].map((m) => m[0]),
     )
     expect(named.size).toBeGreaterThan(0)
     expect([...named].filter((f) => !shipped.has(f))).toEqual([])
+  })
+
+  // The registry is what the bundle script copies from, so anything it can
+  // name must be shipped even if no preamble happens to mention it.
+  it('ships every face the registry can reach', () => {
+    const bundle = join(import.meta.dirname, '../../../public/texlive')
+    const shipped = new Set(readdirSync(bundle))
+    expect(allFontFiles().filter((f) => !shipped.has(f))).toEqual([])
+  })
+
+  it('omits BoldItalicFont for a family that has no such face', () => {
+    // Latin Modern Mono has none. Naming one that does not exist is a hard stop.
+    const mono = buildPreamble(cfg({ typeface: 'latin-modern' }))
+      .split('\\setmonofont')[1]
+      .split(']')[0]
+    expect(mono).not.toContain('BoldItalicFont')
+    expect(mono).toContain('BoldFont=lmmonolt10-bold.otf')
+  })
+
+  it('sets every family from the chosen typeface', () => {
+    const out = buildPreamble(cfg({ typeface: 'pagella' }))
+    expect(out).toContain('\\setmainfont{texgyrepagella-regular.otf}')
+    expect(out).toContain('\\setsansfont{texgyreheros-regular.otf}')
+    expect(out).toContain('\\setmonofont{texgyrecursor-regular.otf}')
+    expect(out).not.toContain('lmroman')
   })
 
   it('loads hyperref last, as hyperref requires', () => {

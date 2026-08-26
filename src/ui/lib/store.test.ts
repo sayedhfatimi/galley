@@ -3,8 +3,10 @@ import { DEFAULT_CONFIG } from '@/core/config'
 import {
   type GalleyStore,
   MAX_PERSISTED_SOURCE,
+  mergePersisted,
   persistedSlice,
   safeStorage,
+  useStore,
 } from './store'
 
 /**
@@ -156,5 +158,51 @@ describe('safeStorage', () => {
     expect(() => safeStorage.setItem('k', '{"state":{}}')).not.toThrow()
     expect(safeStorage.getItem('k')).toBeNull()
     expect(() => safeStorage.removeItem('k')).not.toThrow()
+  })
+})
+
+/**
+ * The failure this guards against only ever happens to a returning reader: a
+ * config persisted before a field existed comes back missing it, and a fresh
+ * browser never reproduces it. Zustand's default merge is shallow, so without
+ * an explicit merge the stored config replaces the defaults outright.
+ */
+describe('mergePersisted', () => {
+  it('backfills config fields a stored config predates', () => {
+    const current = useStore.getState()
+    const stored = {
+      source: 'old work',
+      fileName: 'old',
+      theme: 'light' as const,
+      // A v1 config: no typeface, because the field did not exist yet.
+      config: { ...DEFAULT_CONFIG, character: 'book' as const, typeface: undefined },
+    }
+    delete (stored.config as { typeface?: unknown }).typeface
+
+    const merged = mergePersisted(stored, current)
+
+    expect(merged.config.typeface).toBe(DEFAULT_CONFIG.typeface)
+    expect(merged.config.typeface).toBeDefined()
+    // The reader's own choices must survive the backfill.
+    expect(merged.config.character).toBe('book')
+    expect(merged.source).toBe('old work')
+    expect(merged.theme).toBe('light')
+  })
+
+  it('prefers the stored value over the default when one is present', () => {
+    const current = useStore.getState()
+    const merged = mergePersisted(
+      { config: { ...DEFAULT_CONFIG, typeface: 'pagella' as const } },
+      current,
+    )
+    expect(merged.config.typeface).toBe('pagella')
+  })
+
+  it('survives a persisted state that is absent or malformed', () => {
+    const current = useStore.getState()
+    expect(mergePersisted(undefined, current).config.typeface).toBe(
+      DEFAULT_CONFIG.typeface,
+    )
+    expect(mergePersisted({}, current).config.typeface).toBe(DEFAULT_CONFIG.typeface)
   })
 })

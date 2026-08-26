@@ -14,48 +14,45 @@ import {
   resolvePaper,
   usesChapters,
 } from '../config'
+import { type FontFaces, typefaceOrDefault } from '../fonts'
 import { escapeText } from './escape'
 
 /**
- * Latin Modern, loaded BY FILENAME. There is no fontconfig in a browser, so
- * `\setmainfont{Latin Modern Roman}` cannot resolve; the files are fetched by
- * name from the bundled TeX Live tree. `Ligatures=TeX` is mandatory — without
- * it fontspec leaves `` and --- unconverted, so curly quotes and em dashes
- * never appear.
- */
-const MAIN_FONT = [
-  '\\setmainfont{lmroman10-regular.otf}[',
-  '  Ligatures=TeX,',
-  '  BoldFont=lmroman10-bold.otf,',
-  '  ItalicFont=lmroman10-italic.otf,',
-  '  BoldItalicFont=lmroman10-bolditalic.otf,',
-  ']',
-].join('\n')
-
-/**
+ * The three font families, written from the typeface registry.
+ *
+ * Loaded BY FILENAME rather than family name: there is no fontconfig database
+ * in a browser, so `\setmainfont{TeX Gyre Pagella}` cannot resolve. The files
+ * are fetched by name from the bundled TeX Live tree.
+ *
+ * `Ligatures=TeX` is mandatory on every face — without it fontspec leaves ``
+ * and --- unconverted, so curly quotes and em dashes never appear, and
+ * `escape.ts` deliberately leaves hyphens and apostrophes alone on the
+ * assumption that this mapping is doing that work.
+ *
  * The sans family is declared even though nothing in Markdown selects it,
  * because `\mathsf` reaches it from inside maths. Left undeclared, fontspec
- * still resolves the family to lmsans by name and the compile dies outright
- * with "Font TU/lmss/m/n not loadable" — a hard stop, not a fallback.
- *
- * Latin Modern ships an oblique rather than a true italic here.
+ * still resolves the family by name and the compile dies outright with
+ * "Font TU/lmss/m/n not loadable" — a hard stop, not a fallback.
  */
-const SANS_FONT = [
-  '\\setsansfont{lmsans10-regular.otf}[',
-  '  Ligatures=TeX,',
-  '  BoldFont=lmsans10-bold.otf,',
-  '  ItalicFont=lmsans10-oblique.otf,',
-  '  BoldItalicFont=lmsans10-boldoblique.otf,',
-  ']',
-].join('\n')
+function fontFamily(command: string, faces: FontFaces): string {
+  const lines = [`\\${command}{${faces.regular}}[`, '  Ligatures=TeX,']
+  lines.push(`  BoldFont=${faces.bold},`)
+  lines.push(`  ItalicFont=${faces.italic},`)
+  // Latin Modern Mono has no bold-italic. Naming a face that does not exist is
+  // a hard stop, so the key is omitted rather than pointed at a substitute.
+  if (faces.boldItalic) lines.push(`  BoldItalicFont=${faces.boldItalic},`)
+  lines.push(']')
+  return lines.join('\n')
+}
 
-const MONO_FONT = [
-  '\\setmonofont{lmmono10-regular.otf}[',
-  '  Ligatures=TeX,',
-  '  BoldFont=lmmonolt10-bold.otf,',
-  '  ItalicFont=lmmono10-italic.otf,',
-  ']',
-].join('\n')
+function fontBlock(config: GalleyConfig): string[] {
+  const face = typefaceOrDefault(config.typeface)
+  return [
+    fontFamily('setmainfont', face.serif),
+    fontFamily('setsansfont', face.sans),
+    fontFamily('setmonofont', face.mono),
+  ]
+}
 
 function classOptions(config: GalleyConfig): string[] {
   const opts: string[] = [`${config.fontSize}pt`]
@@ -142,9 +139,7 @@ export function buildPreamble(config: GalleyConfig): string {
     '% Loaded by filename rather than family name so the document compiles',
     '% identically in a browser, where no system font database exists.',
     '\\usepackage{fontspec}',
-    MAIN_FONT,
-    SANS_FONT,
-    MONO_FONT,
+    ...fontBlock(config),
     '',
     '% ---- Text and structure ----',
     '\\usepackage{setspace}',
