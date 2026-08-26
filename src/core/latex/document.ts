@@ -43,9 +43,17 @@ export function convert(source: string, config: GalleyConfig): ConvertResult {
   const { title, subtitle, author, date } = config.metadata
   const hasTitleBlock = Boolean(title || subtitle || author || date)
 
+  // A book numbers its title page and contents in roman and starts the body
+  // again at arabic 1, which is what makes the front of it read as a printed
+  // book rather than as page one of a long article. Only the book class
+  // defines these; report and article do not.
+  const matter = config.character === 'book'
+
   const parts = [buildPreamble(config), '', '\\begin{document}', '']
+  if (matter) parts.push('\\frontmatter', '')
   if (hasTitleBlock) parts.push('\\maketitle', '')
   if (config.toc.include) parts.push('\\tableofcontents', '')
+  if (matter) parts.push('\\mainmatter', '')
   // A frontmatter-only document still compiles; the body is simply empty.
   if (body.length > 0) parts.push(body, '')
   parts.push('\\end{document}', '')

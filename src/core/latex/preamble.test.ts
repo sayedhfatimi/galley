@@ -216,4 +216,44 @@ describe('buildPreamble', () => {
     )
     expect(packages.at(-1)).toBe('hyperref')
   })
+
+  describe('PDF information', () => {
+    it('tells the PDF its own title, author and subject', () => {
+      const out = buildPreamble(
+        cfg({
+          metadata: {
+            title: 'The Long Now',
+            author: 'Ada Lovelace',
+            subtitle: 'On time',
+          },
+        }),
+      )
+      expect(out).toContain('pdftitle={The Long Now}')
+      expect(out).toContain('pdfauthor={Ada Lovelace}')
+      expect(out).toContain('pdfsubject={On time}')
+    })
+
+    it('stays a bare hidelinks when there is no metadata', () => {
+      expect(buildPreamble(cfg({ metadata: {} }))).toContain('\\hypersetup{hidelinks}')
+    })
+
+    it('keeps hidelinks alongside the metadata', () => {
+      expect(buildPreamble(cfg({ metadata: { title: 'X' } }))).toContain('hidelinks')
+    })
+
+    it('escapes for a PDF string, not for typesetting', () => {
+      // 100% would end the argument at the comment character; the text-symbol
+      // commands escapeText would emit are exactly what hyperref cannot use.
+      const out = buildPreamble(cfg({ metadata: { title: 'On 100% certainty ~ x^2' } }))
+      expect(out).toContain('pdftitle={On 100\\% certainty  x2}')
+
+      // The SAME title in \\title{} is escaped for typesetting instead, and
+      // does carry the text-symbol commands. The two contexts differ on
+      // purpose; asserting across the whole preamble would conflate them.
+      const hyper = out.slice(out.indexOf('\\hypersetup'))
+      expect(hyper).not.toContain('textasciitilde')
+      expect(hyper).not.toContain('textasciicircum')
+      expect(out).toContain('\\textasciitilde{}')
+    })
+  })
 })

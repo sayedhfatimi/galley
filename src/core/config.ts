@@ -84,6 +84,12 @@ export interface GalleyConfig {
   typeface: TypefaceName
   lineSpacing: LineSpacing
   toc: { include: boolean; depth: number }
+  /**
+   * Reproduce each link's target as a footnote. Right for something that will
+   * be printed, where an invisible destination is useless; noise in a PDF that
+   * will only ever be read on screen, where the link is clickable.
+   */
+  links: { footnoteUrls: boolean }
   /** Only meaningful when top-level headings become chapters. */
   chapters: { startOnNewPage: boolean; forceRecto: boolean }
   /**
@@ -131,6 +137,7 @@ export const DEFAULT_CONFIG: GalleyConfig = {
   typeface: DEFAULT_TYPEFACE,
   lineSpacing: 'single',
   toc: { include: false, depth: 2 },
+  links: { footnoteUrls: true },
   chapters: { startOnNewPage: true, forceRecto: false },
   metadata: {},
 }

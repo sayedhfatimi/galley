@@ -262,3 +262,25 @@ describe('document shape', () => {
     expect(tex('One.\n\nTwo.')).toBe('One.\n\nTwo.')
   })
 })
+
+describe('link footnotes', () => {
+  const md = 'See [the notes](https://example.com/notes).\n'
+
+  it('reproduces the target as a footnote by default, for print', () => {
+    const { body } = serializeToLatex(parseMarkdown(md), DEFAULT_CONFIG)
+    expect(body).toContain('\\footnote{\\url{https://example.com/notes}}')
+  })
+
+  it('omits the footnote when the document is for the screen', () => {
+    const config = { ...DEFAULT_CONFIG, links: { footnoteUrls: false } }
+    const { body } = serializeToLatex(parseMarkdown(md), config)
+    expect(body).toContain('\\href{https://example.com/notes}{the notes}')
+    expect(body).not.toContain('\\footnote')
+  })
+
+  it('never footnotes a bare URL, which already shows its target', () => {
+    const config = { ...DEFAULT_CONFIG, links: { footnoteUrls: true } }
+    const { body } = serializeToLatex(parseMarkdown('<https://example.com>\n'), config)
+    expect(body).not.toContain('\\footnote')
+  })
+})

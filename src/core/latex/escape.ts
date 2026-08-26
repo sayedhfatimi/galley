@@ -93,3 +93,39 @@ export function escapeUrl(input: string): string {
 export function isVerbatimSafe(code: string): boolean {
   return !/\\end\s*\{\s*Verbatim\s*\}/.test(code)
 }
+
+/**
+ * Escaping for a PDF information string — `pdftitle`, `pdfauthor`, `pdfsubject`.
+ *
+ * A different context from body text, so deliberately not `escapeText`. These
+ * values are read by hyperref's `\pdfstringdef`, which builds a PDF string
+ * rather than typesetting anything: font-dependent commands mean nothing there,
+ * and hyperref warns about tokens it cannot convert. What still has to be
+ * handled is TeX's own tokenisation, which happens before hyperref sees the
+ * value at all — an unbalanced brace or a bare `%` breaks the argument itself.
+ *
+ * Non-ASCII passes straight through. The engine is XeTeX and hyperref writes
+ * these as Unicode, so an accented author name needs no help.
+ */
+const PDF_STRING_ESCAPES: Readonly<Record<string, string>> = {
+  '#': '\\#',
+  $: '\\$',
+  '%': '\\%',
+  '&': '\\&',
+  _: '\\_',
+  '{': '\\{',
+  '}': '\\}',
+  // Dropped rather than escaped: the text-symbol commands that would represent
+  // these are exactly what hyperref cannot put in a PDF string, and a metadata
+  // field is not worth a warning in the log over a character nobody typed on
+  // purpose.
+  '~': '',
+  '^': '',
+  '\\': '',
+}
+
+const PDF_STRING_PATTERN = /[#$%&_{}~^\\]/g
+
+export function escapePdfString(input: string): string {
+  return input.replace(PDF_STRING_PATTERN, (c) => PDF_STRING_ESCAPES[c] ?? c).trim()
+}

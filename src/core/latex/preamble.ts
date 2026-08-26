@@ -15,7 +15,7 @@ import {
   usesChapters,
 } from '../config'
 import { type FontFaces, typefaceOrDefault } from '../fonts'
-import { escapeText } from './escape'
+import { escapePdfString, escapeText } from './escape'
 
 /**
  * The three font families, written from the typeface registry.
@@ -123,6 +123,25 @@ function titleBlock(config: GalleyConfig): string[] {
   return lines
 }
 
+/**
+ * Link styling, and the document's own identity.
+ *
+ * The PDF information fields are what a reader's viewer shows in its title bar,
+ * what a library catalogue reads, and what a file manager indexes — so a
+ * document that knows its own title is worth the four lines. Taken from the
+ * same metadata as the title page, escaped for a PDF string rather than for
+ * typesetting.
+ */
+function hyperSetup(config: GalleyConfig): string[] {
+  const { title, subtitle, author } = config.metadata
+  const options = ['hidelinks']
+  if (title) options.push(`pdftitle={${escapePdfString(title)}}`)
+  if (author) options.push(`pdfauthor={${escapePdfString(author)}}`)
+  if (subtitle) options.push(`pdfsubject={${escapePdfString(subtitle)}}`)
+  if (options.length === 1) return ['\\hypersetup{hidelinks}']
+  return ['\\hypersetup{', ...options.map((o) => `  ${o},`), '}']
+}
+
 export function buildPreamble(config: GalleyConfig): string {
   const out: string[] = []
   const push = (...lines: string[]) => out.push(...lines)
@@ -208,7 +227,7 @@ export function buildPreamble(config: GalleyConfig): string {
     '% ---- Links ----',
     '% hyperref must be loaded last; it redefines commands from other packages.',
     '\\usepackage{hyperref}',
-    '\\hypersetup{hidelinks}',
+    ...hyperSetup(config),
   )
 
   return out.join('\n')

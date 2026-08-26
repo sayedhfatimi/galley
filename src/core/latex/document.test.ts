@@ -92,3 +92,21 @@ describe('readFrontmatter', () => {
     expect(readFrontmatter('# Just a heading')).toEqual({})
   })
 })
+describe('front and main matter', () => {
+  it("numbers a book's front matter separately from its body", () => {
+    const tex = convert('# One\n\nText.\n', presetFor('book')).tex
+    expect(tex).toContain('\\frontmatter')
+    expect(tex).toContain('\\mainmatter')
+    // Order matters: contents belong to the front matter, the body does not.
+    expect(tex.indexOf('\\frontmatter')).toBeLessThan(tex.indexOf('\\mainmatter'))
+    expect(tex.indexOf('\\mainmatter')).toBeLessThan(tex.indexOf('\\chapter{One}'))
+  })
+
+  it('leaves article and report alone, which have no such commands', () => {
+    for (const character of ['article', 'report'] as const) {
+      const tex = convert('# One\n', presetFor(character)).tex
+      expect(tex).not.toContain('\\frontmatter')
+      expect(tex).not.toContain('\\mainmatter')
+    }
+  })
+})

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -16,9 +17,11 @@ import {
   type FontSize,
   type GalleyConfig,
   type LineSpacing,
+  type Margins,
   PAPER_SIZES,
   type PaperName,
   presetFor,
+  resolvePaper,
   usesChapters,
 } from '@/core/config'
 import { previewFamily, TYPEFACE_NAMES, TYPEFACES, type TypefaceName } from '@/core/fonts'
@@ -122,6 +125,22 @@ function KdpPreset({
   )
 }
 
+/**
+ * Inner and outer alternate on facing pages; on a one-sided document that
+ * distinction is meaningless, so it is presented as plain left and right —
+ * matching how `preamble.ts` writes the geometry.
+ */
+const MARGIN_EDGES = [
+  { key: 'top', oneSided: 'Top', twoSided: 'Top' },
+  { key: 'bottom', oneSided: 'Bottom', twoSided: 'Bottom' },
+  { key: 'inner', oneSided: 'Left', twoSided: 'Inner' },
+  { key: 'outer', oneSided: 'Right', twoSided: 'Outer' },
+] as const satisfies readonly {
+  key: keyof Omit<Margins, 'unit'>
+  oneSided: string
+  twoSided: string
+}[]
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="grid gap-1.5">
@@ -168,8 +187,28 @@ export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
   const setMeta = (key: keyof GalleyConfig['metadata'], value: string) =>
     onChange({ ...config, metadata: { ...config.metadata, [key]: value || undefined } })
 
+  const setMargin = (key: keyof Omit<Margins, 'unit'>, raw: string) => {
+    const value = Number(raw)
+    // An empty or half-typed field must not write NaN into the geometry, which
+    // would reach the .tex as a literal "NaNmm" and fail to compile.
+    if (raw === '' || !Number.isFinite(value) || value < 0) return
+    onChange({ ...config, margins: { ...config.margins, [key]: value } })
+  }
+
   const chapters = usesChapters(config.character)
   const paperName = config.paper.kind === 'named' ? config.paper.name : 'a4'
+
+  // Margins that leave no text block produce a document LaTeX cannot set, so
+  // say so here rather than letting the render fail with a geometry error.
+  const page = resolvePaper(config.paper)
+  const m = config.margins
+  const scale = page.unit === m.unit ? 1 : page.unit === 'mm' ? 25.4 : 1 / 25.4
+  const marginProblem =
+    m.inner + m.outer >= page.width * scale
+      ? 'The side margins leave no room for text.'
+      : m.top + m.bottom >= page.height * scale
+        ? 'The top and bottom margins leave no room for text.'
+        : null
 
   return (
     // min-w-0: a Select renders the chosen item's hint in its trigger, and a
@@ -220,6 +259,33 @@ export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
               ))}
             </SelectContent>
           </Select>
+        </Field>
+
+        <Field label={`Margins (${config.margins.unit})`}>
+          <div className="grid grid-cols-4 gap-2">
+            {MARGIN_EDGES.map((edge) => (
+              <div key={edge.key} className="grid gap-1">
+                <Label
+                  htmlFor={`margin-${edge.key}`}
+                  className="text-muted-foreground text-[0.7rem]"
+                >
+                  {config.twoSided ? edge.twoSided : edge.oneSided}
+                </Label>
+                <Input
+                  id={`margin-${edge.key}`}
+                  type="number"
+                  min={0}
+                  step={config.margins.unit === 'mm' ? 1 : 0.125}
+                  value={config.margins[edge.key]}
+                  onChange={(e) => setMargin(edge.key, e.target.value)}
+                  className="h-8 text-sm"
+                />
+              </div>
+            ))}
+          </div>
+          {marginProblem ? (
+            <p className="mt-1.5 text-destructive text-xs">{marginProblem}</p>
+          ) : null}
         </Field>
 
         <Field label="Typeface">
@@ -299,6 +365,14 @@ export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
           hint="Margins alternate for binding"
           checked={config.twoSided}
           onChange={(v) => set('twoSided', v)}
+        />
+
+        <ToggleRow
+          id="link-footnotes"
+          label="Footnote link addresses"
+          hint="Needed on paper, noise on screen"
+          checked={config.links.footnoteUrls}
+          onChange={(v) => set('links', { ...config.links, footnoteUrls: v })}
         />
 
         <ToggleRow

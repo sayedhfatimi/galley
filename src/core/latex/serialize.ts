@@ -308,7 +308,11 @@ class Serializer {
     const safeUrl = escapeUrl(url)
     const bare = label === escapeText(url)
     if (bare) return `\\url{${safeUrl}}`
-    return `\\href{${safeUrl}}{${label}}\\footnote{\\url{${safeUrl}}}`
+    const link = `\\href{${safeUrl}}{${label}}`
+    // A bare URL already shows its own target, so it never takes a footnote
+    // whatever this is set to — repeating it would be noise on any medium.
+    if (!this.#config.links.footnoteUrls) return link
+    return `${link}\\footnote{\\url{${safeUrl}}}`
   }
 
   /**
