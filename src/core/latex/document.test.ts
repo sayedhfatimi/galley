@@ -47,8 +47,10 @@ describe('convert', () => {
   })
 
   it('surfaces diagnostics rather than throwing', () => {
-    const { diagnostics } = convert('![alt](a.png)', cfg())
-    expect(diagnostics.map((d) => d.kind)).toContain('image-unsupported')
+    // Raw HTML has no typeset equivalent, so it is reported rather than dropped.
+    const result = convert('<div>raw</div>\n', DEFAULT_CONFIG)
+    expect(result.diagnostics.map((d) => d.kind)).toContain('raw-html')
+    expect(result.tex).toContain('\\begin{document}')
   })
 
   // "Conversion from Markdown to LaTeX should not fail."

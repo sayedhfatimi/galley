@@ -17,11 +17,19 @@ export interface ActionBarProps {
   /** Derived in App, where the conversion is memoised. */
   tex: string
   busy: boolean
+  /** A document with figures is handed over as a zip; say so on the button. */
+  hasImages: boolean
   onRender: () => void
   onDownloadTex: () => void
 }
 
-export function ActionBar({ tex, busy, onRender, onDownloadTex }: ActionBarProps) {
+export function ActionBar({
+  tex,
+  busy,
+  hasImages,
+  onRender,
+  onDownloadTex,
+}: ActionBarProps) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b bg-background/80 px-4 backdrop-blur">
       <div className="flex min-w-0 items-center gap-3">
@@ -51,7 +59,7 @@ export function ActionBar({ tex, busy, onRender, onDownloadTex }: ActionBarProps
             leave the source one click away. */}
         <Button variant="ghost" size="sm" onClick={onDownloadTex} disabled={!tex.trim()}>
           <Download className="size-3.5" />
-          .tex
+          {hasImages ? '.zip' : '.tex'}
         </Button>
 
         <ButtonGroup>

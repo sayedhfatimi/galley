@@ -56,13 +56,31 @@ describe('findScriptGaps', () => {
   const lm = TYPEFACES['latin-modern']
   const pagella = TYPEFACES.pagella
 
-  it('reports Greek only when the typeface cannot set it', () => {
-    expect(findScriptGaps('Ωμέγα', lm).map((g) => g.script)).toEqual(['Greek'])
-    expect(findScriptGaps('Ωμέγα', pagella)).toEqual([])
+  it('reports Greek letters only when the typeface cannot set them', () => {
+    // Unaccented letters: absent from Latin Modern, present in every TeX Gyre.
+    expect(findScriptGaps('ΩΜΕΓΑ', lm).map((g) => g.script)).toEqual(['Greek'])
+    expect(findScriptGaps('ΩΜΕΓΑ', pagella)).toEqual([])
   })
 
-  it('marks Greek fixable, because choosing another typeface solves it', () => {
-    expect(findScriptGaps('Ωμέγα', lm)[0].fixable).toBe(true)
+  it('marks Greek letters fixable, because another typeface solves them', () => {
+    expect(findScriptGaps('ΩΜΕΓΑ', lm)[0].fixable).toBe(true)
+  })
+
+  it('never claims an accented Greek letter is fixable', () => {
+    // Measured with XeTeX: no bundled face has a single precomposed accented
+    // form, so Ωμέγα is still incomplete in Pagella. Saying otherwise would be
+    // the overclaim this diagnostic exists to prevent.
+    const gaps = findScriptGaps('Ωμέγα', pagella)
+    expect(gaps.map((g) => g.script)).toEqual(['Accented Greek'])
+    expect(gaps[0].fixable).toBe(false)
+    expect(gaps[0].sample).toBe('έ')
+  })
+
+  it('separates the fixable letters from the unfixable accents', () => {
+    const gaps = findScriptGaps('Ωμέγα', lm)
+    expect(gaps.map((g) => g.script).sort()).toEqual(['Accented Greek', 'Greek'])
+    expect(gaps.find((g) => g.script === 'Greek')?.fixable).toBe(true)
+    expect(gaps.find((g) => g.script === 'Accented Greek')?.fixable).toBe(false)
   })
 
   it('reports scripts no typeface covers as unfixable', () => {
@@ -80,8 +98,16 @@ describe('findScriptGaps', () => {
     expect(gap.sample).toBe('αβ')
   })
 
+  it('records that only the unaccented letters are what a typeface fixes', () => {
+    expect(TYPEFACES['latin-modern'].greek).toBe(false)
+    expect(TYPEFACES.pagella.greek).toBe(true)
+    // ...and that is a claim about Α–Ω and α–ω only.
+    expect(findScriptGaps('άέήίόύώ', TYPEFACES.pagella)).toHaveLength(1)
+  })
+
   it('groups one entry per script rather than one per character', () => {
-    expect(findScriptGaps('Ωμέγα Привет', lm)).toHaveLength(2)
+    // Greek letters, the accent, and Cyrillic — three, not one per character.
+    expect(findScriptGaps('Ωμέγα Привет', lm)).toHaveLength(3)
   })
 })
 

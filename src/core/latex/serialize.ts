@@ -12,6 +12,7 @@ import type {
   Definition,
   FootnoteDefinition,
   Heading,
+  Image,
   List,
   ListItem,
   Nodes,
@@ -23,11 +24,30 @@ import type {
 import { type DocumentCharacter, type GalleyConfig, usesChapters } from '../config'
 import { type Diagnostic, DiagnosticCollector } from '../diagnostics'
 import { findScriptGaps, typefaceOrDefault, typefacesWithGreek } from '../fonts'
+import { classifyImage, SUPPORTED_IMAGE_LIST } from '../images'
 import { escapeText, escapeUrl, isVerbatimSafe } from './escape'
 
 export interface SerializeResult {
   body: string
   diagnostics: Diagnostic[]
+  /**
+   * Sanitised names of every image the document actually draws, so the caller
+   * can supply exactly those bytes to the engine rather than the whole store.
+   */
+  images: string[]
+}
+
+/**
+ * The image in a paragraph that contains nothing else — a figure written on
+ * its own line, which is how a figure is written in Markdown. Whitespace-only
+ * text siblings are tolerated, because remark keeps them.
+ */
+function loneImage(node: Paragraph): Image | null {
+  const meaningful = node.children.filter(
+    (c) => !(c.type === 'text' && c.value.trim() === ''),
+  )
+  const [only] = meaningful
+  return meaningful.length === 1 && only.type === 'image' ? only : null
 }
 
 /**
@@ -79,15 +99,23 @@ class Serializer {
   readonly #diagnostics = new DiagnosticCollector()
   readonly #definitions = new Map<string, Definition>()
   readonly #footnotes = new Map<string, FootnoteDefinition>()
+  readonly #images = new Set<string>()
+  /**
+   * Names the caller actually holds bytes for, or undefined when it does not
+   * know. Undefined means "assume present" — the build script and most tests
+   * have no store to ask.
+   */
+  readonly #available: ReadonlySet<string> | undefined
 
-  constructor(config: GalleyConfig) {
+  constructor(config: GalleyConfig, available?: ReadonlySet<string>) {
     this.#config = config
+    this.#available = available
   }
 
   run(tree: Root): SerializeResult {
     this.#collectDefinitions(tree)
     const body = this.#blocks(tree.children)
-    return { body, diagnostics: this.#diagnostics.list() }
+    return { body, diagnostics: this.#diagnostics.list(), images: [...this.#images] }
   }
 
   /** Link and footnote definitions may appear anywhere, so gather them first. */
@@ -113,8 +141,16 @@ class Serializer {
     switch (node.type) {
       case 'heading':
         return this.#heading(node)
-      case 'paragraph':
+      case 'paragraph': {
+        // A paragraph that is nothing but an image is a FIGURE, and a figure is
+        // a block. mdast has no block-level image node — an image is always
+        // phrasing content inside a paragraph — so the distinction has to be
+        // drawn here rather than in the inline dispatch, which cannot legally
+        // open a float in the middle of a text flow.
+        const only = loneImage(node as Paragraph)
+        if (only) return this.#figure(only.alt ?? '', only.url)
         return this.#inline((node as Paragraph).children)
+      }
       case 'list':
         return this.#list(node)
       case 'blockquote':
@@ -293,8 +329,8 @@ class Serializer {
   #checkGlyphs(value: string): void {
     for (const gap of findScriptGaps(value, typefaceOrDefault(this.#config.typeface))) {
       const message = gap.fixable
-        ? `${gap.script} text needs a typeface that covers it. Try ${typefacesWithGreek().join(', ')}.`
-        : `${gap.script} text cannot be typeset — no bundled typeface covers it.`
+        ? `${gap.script} letters need a typeface that covers them. Try ${typefacesWithGreek().join(', ')}.`
+        : `${gap.script} cannot be typeset — no bundled typeface covers it.`
       this.#diagnostics.add('missing-glyphs', message, gap.sample)
     }
   }
@@ -316,20 +352,85 @@ class Serializer {
   }
 
   /**
-   * Figures are out of scope for v1, but a silent drop is worse than a visible
-   * gap: the reader sees exactly where the image was and why it is missing.
+   * A figure: the image, centred, with the alt text as its caption.
+   *
+   * `htbp` rather than a fixed position because a float that cannot be placed
+   * where it was written is better moved than dropped. Capped at the text width
+   * because core cannot know the image's pixel dimensions, and an oversized
+   * graphic silently running into the margin is the worse failure.
    */
-  #image(alt: string, url: string): string {
-    this.#diagnostics.add(
-      'image-unsupported',
-      'Images are not supported yet. Each one is marked in the document so you can see where it belongs.',
-      url,
-    )
+  #figure(alt: string, url: string): string {
+    const graphic = this.#graphic(url)
+    if (graphic === null) return this.#unrenderable(alt, url)
+
+    const caption = alt.trim() ? `\n  \\caption{${escapeText(alt.trim())}}` : ''
+    return [
+      '\\begin{figure}[htbp]',
+      '  \\centering',
+      `  ${graphic}`,
+      caption.slice(1),
+      '\\end{figure}',
+    ]
+      .filter((l) => l.length > 0)
+      .join('\n')
+  }
+
+  /**
+   * The `\\includegraphics` call, or null when the reference cannot be drawn.
+   * The name is already sanitised, so it needs no escaping — see `images.ts`.
+   */
+  #graphic(url: string): string | null {
+    const image = classifyImage(url)
+    if (image.kind !== 'supported') return null
+    // A name galley cannot supply bytes for must NOT become an
+    // \includegraphics: the engine stops the whole document with "Unable to
+    // load picture", which is a far worse outcome than the gap it replaces.
+    // Any manuscript written elsewhere and pasted in arrives in exactly this
+    // state.
+    if (this.#available && !this.#available.has(image.name)) return null
+    this.#images.add(image.name)
+    return `\\includegraphics[width=\\linewidth,keepaspectratio]{${image.name}}`
+  }
+
+  /**
+   * A reference galley will not draw. A silent drop is worse than a visible
+   * gap: the reader sees exactly where the image belongs and why it is absent.
+   */
+  #unrenderable(alt: string, url: string): string {
+    const image = classifyImage(url)
+    if (image.kind === 'remote') {
+      this.#diagnostics.add(
+        'image-unsupported',
+        'An image hosted elsewhere is not included. galley never fetches from the network, so only a file you attach can be typeset.',
+        url,
+      )
+    } else if (image.kind === 'unsupported-format') {
+      this.#diagnostics.add(
+        'image-unsupported',
+        `That image format cannot be typeset. Use ${SUPPORTED_IMAGE_LIST}.`,
+        url,
+      )
+    } else {
+      this.#diagnostics.add(
+        'image-unsupported',
+        'That image is named by the document but has not been added. Drop or paste the file in to include it.',
+        url,
+      )
+    }
     const caption = alt.trim() ? escapeText(alt.trim()) : escapeText(url)
     return `\\fbox{\\parbox{0.9\\linewidth}{\\centering\\small [Figure not included: ${caption}]}}`
   }
+
+  /** Inline, mixed into a sentence: no float and no caption, just the graphic. */
+  #image(alt: string, url: string): string {
+    return this.#graphic(url) ?? this.#unrenderable(alt, url)
+  }
 }
 
-export function serializeToLatex(tree: Root, config: GalleyConfig): SerializeResult {
-  return new Serializer(config).run(tree)
+export function serializeToLatex(
+  tree: Root,
+  config: GalleyConfig,
+  available?: ReadonlySet<string>,
+): SerializeResult {
+  return new Serializer(config, available).run(tree)
 }

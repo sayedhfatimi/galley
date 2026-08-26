@@ -100,7 +100,7 @@ export function ResultDialog({ compile, onDownloadTex }: ResultDialogProps) {
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={onDownloadTex}>
                 <Download className="size-3.5" />
-                Download the .tex
+                Download the source
               </Button>
               {log && (
                 <Button variant="ghost" size="sm" onClick={() => setShowLog((v) => !v)}>
@@ -146,7 +146,7 @@ export function ResultDialog({ compile, onDownloadTex }: ResultDialogProps) {
               </Button>
               <Button variant="outline" size="sm" onClick={onDownloadTex}>
                 <Download className="size-3.5" />
-                Download .tex
+                Download the source
               </Button>
             </div>
           </>

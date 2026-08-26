@@ -36,13 +36,16 @@ export interface Typeface {
   sans: FontFaces
   mono: FontFaces
   /**
-   * Whether the text faces carry lowercase Greek. Latin Modern does not — a
-   * word like Ωμέγα loses everything after the capital — and that is the whole
-   * reason this menu exists rather than being a cosmetic addition.
+   * Whether the faces carry the UNACCENTED Greek letters, Α–Ω and α–ω.
    *
-   * Measured, not assumed: every TeX Gyre face here covers all 25 of U+03B1..
-   * U+03C9, and every Latin Modern face covers none of them. None of them
-   * cover Cyrillic, so nothing here claims to.
+   * Latin Modern has none of them, so a word like Ωμέγα loses everything after
+   * the capital — the reason this menu exists rather than being cosmetic.
+   *
+   * It is deliberately NOT a claim to support Greek text. No bundled face has
+   * a single precomposed accented form, and monotonic Greek is accented on
+   * nearly every word, so accented Greek is reported separately and as
+   * unfixable. Measured with XeTeX against each face, not read from a font
+   * database — fontconfig claimed characters the engine then refused.
    */
   greek: boolean
 }
@@ -198,11 +201,32 @@ interface ScriptRange {
   fixable: boolean
 }
 
+/**
+ * Measured with XeTeX itself against every bundled face, not taken from a font
+ * database — fontconfig's charset claimed characters the engine then refused.
+ *
+ * What TeX Gyre actually has is the UNACCENTED letters: Α–Ω and α–ω. It has no
+ * precomposed accented form at all — ά έ ή ί ό ύ ώ, and the dialytika — and
+ * neither does Latin Modern. That matters more than it sounds: monotonic Greek
+ * prose is accented on almost every word, so galley still cannot set Greek
+ * *text*. What the typeface menu buys is Greek *letters*, which is the case
+ * that actually turns up in an English document — a name, or a symbol used in
+ * running prose rather than in maths.
+ *
+ * Saying "Greek" without that distinction would be the overclaim this whole
+ * diagnostic exists to prevent, so the two are separate entries.
+ */
 const SCRIPTS: ScriptRange[] = [
-  // Covered by every TeX Gyre face and by no Latin Modern face.
-  { name: 'Greek', from: 0x0370, to: 0x03ff, fixable: true },
-  { name: 'Greek', from: 0x1f00, to: 0x1fff, fixable: true },
-  // Covered by nothing galley bundles. Listing them is honest; pretending the
+  // Unaccented Greek letters: absent from Latin Modern, present in every TeX
+  // Gyre face. U+03A2 is unassigned and falls in the gap deliberately.
+  { name: 'Greek', from: 0x0391, to: 0x03a1, fixable: true },
+  { name: 'Greek', from: 0x03a3, to: 0x03a9, fixable: true },
+  { name: 'Greek', from: 0x03b1, to: 0x03c9, fixable: true },
+  // Everything else Greek — accents, dialytika, archaic letters, polytonic.
+  // No bundled face has any of it, so no typeface choice is an answer.
+  { name: 'Accented Greek', from: 0x0370, to: 0x03ff, fixable: false },
+  { name: 'Accented Greek', from: 0x1f00, to: 0x1fff, fixable: false },
+  // Covered by nothing galley bundles. Listing them is honest; implying the
   // typeface menu is the answer would not be.
   { name: 'Cyrillic', from: 0x0400, to: 0x04ff, fixable: false },
   { name: 'Hebrew', from: 0x0590, to: 0x05ff, fixable: false },

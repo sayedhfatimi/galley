@@ -292,3 +292,15 @@
   src: url("/texlive/texgyrebonum-regular.otf") format("opentype");
   font-display: swap;
 }
+
+/*
+ * An attached image previews at its real content; a remote or unsupported one
+ * keeps the placeholder, because galley will not fetch it. See editor/image.ts.
+ */
+.prose-editor img.image-preview {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1rem auto;
+  border-radius: 0.5rem;
+}

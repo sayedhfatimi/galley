@@ -203,18 +203,66 @@ describe('links', () => {
 })
 
 describe('images', () => {
-  it('emits a visible placeholder rather than dropping the image', () => {
+  it('sets a lone image as a figure, with the alt text as its caption', () => {
     const out = tex('![A diagram](fig.png)')
+    expect(out).toContain('\\begin{figure}[htbp]')
+    expect(out).toContain('\\includegraphics[width=\\linewidth,keepaspectratio]{fig.png}')
+    expect(out).toContain('\\caption{A diagram}')
+  })
+
+  it('omits the caption when there is no alt text', () => {
+    const out = tex('![](fig.png)')
+    expect(out).toContain('\\begin{figure}')
+    expect(out).not.toContain('\\caption')
+  })
+
+  it('keeps an image mixed into a sentence inline, with no float', () => {
+    // A float opened mid-paragraph would reorder the reader's prose.
+    const out = tex('Before ![x](fig.png) after.')
+    expect(out).toContain('\\includegraphics')
+    expect(out).not.toContain('\\begin{figure}')
+  })
+
+  it('reports the names it drew, so the caller supplies exactly those bytes', () => {
+    const { images } = serializeToLatex(
+      parseMarkdown('![a](one.png)\n\n![b](two.jpg)'),
+      DEFAULT_CONFIG,
+    )
+    expect(images).toEqual(['one.png', 'two.jpg'])
+  })
+
+  it('sanitises the name once, so the .tex and the store agree', () => {
+    // A space or a # would end \includegraphics' argument early, and a
+    // directory prefix means nothing in the engine's flat filesystem.
+    // Angle brackets are how CommonMark carries a URL containing spaces.
+    const { body, images } = serializeToLatex(
+      parseMarkdown('![x](<My Photo #2.PNG>)'),
+      DEFAULT_CONFIG,
+    )
+    expect(images).toEqual(['My-Photo-2.png'])
+    expect(body).toContain('{My-Photo-2.png}')
+  })
+
+  it('refuses a remote image rather than fetching it', () => {
+    const out = tex('![x](https://example.com/a.png)')
     expect(out).toContain('Figure not included')
-    expect(out).toContain('A diagram')
+    expect(diags('![x](https://example.com/a.png)').map((d) => d.kind)).toContain(
+      'image-unsupported',
+    )
   })
 
-  it('raises a diagnostic at conversion time', () => {
-    expect(diags('![x](a.png)').map((d) => d.kind)).toContain('image-unsupported')
+  it('refuses a format it cannot typeset, naming the ones it can', () => {
+    expect(diags('![x](a.svg)')[0].message).toContain('PNG, JPG, JPEG, PDF')
+    expect(tex('![x](a.svg)')).toContain('Figure not included')
   })
 
-  it('reports repeated images once rather than flooding the reader', () => {
-    expect(diags('![a](x.png)\n\n![a](x.png)\n\n![a](x.png)')).toHaveLength(1)
+  it('draws nothing for an unrenderable image, so nothing is silently lost', () => {
+    const { images } = serializeToLatex(parseMarkdown('![x](a.svg)'), DEFAULT_CONFIG)
+    expect(images).toEqual([])
+  })
+
+  it('reports a repeated bad reference once rather than flooding the reader', () => {
+    expect(diags('![a](x.svg)\n\n![a](x.svg)\n\n![a](x.svg)')).toHaveLength(1)
   })
 })
 
@@ -282,5 +330,39 @@ describe('link footnotes', () => {
     const config = { ...DEFAULT_CONFIG, links: { footnoteUrls: true } }
     const { body } = serializeToLatex(parseMarkdown('<https://example.com>\n'), config)
     expect(body).not.toContain('\\footnote')
+  })
+})
+
+describe('images the reader has not attached', () => {
+  it('shows a gap rather than emitting a picture the engine cannot load', () => {
+    // \includegraphics on a missing file stops the WHOLE document with
+    // "Unable to load picture", so a manuscript pasted in from elsewhere would
+    // fail to render entirely rather than losing one figure.
+    const { body, images, diagnostics } = serializeToLatex(
+      parseMarkdown('![A chart](chart.png)'),
+      DEFAULT_CONFIG,
+      new Set<string>(),
+    )
+    expect(body).not.toContain('\\includegraphics')
+    expect(body).toContain('Figure not included')
+    expect(images).toEqual([])
+    expect(diagnostics[0].message).toContain('has not been added')
+  })
+
+  it('draws the ones it does hold', () => {
+    const { body, images } = serializeToLatex(
+      parseMarkdown('![a](have.png)\n\n![b](missing.png)'),
+      DEFAULT_CONFIG,
+      new Set(['have.png']),
+    )
+    expect(body).toContain('{have.png}')
+    expect(body).not.toContain('{missing.png}')
+    expect(images).toEqual(['have.png'])
+  })
+
+  it('assumes present when the caller cannot say', () => {
+    // The bundle builder and most tests have no store to consult.
+    const { images } = serializeToLatex(parseMarkdown('![a](x.png)'), DEFAULT_CONFIG)
+    expect(images).toEqual(['x.png'])
   })
 })

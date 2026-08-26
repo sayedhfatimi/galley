@@ -13,9 +13,15 @@ import type { GalleyConfig, Margins, PaperName } from './config'
  * real page count once the PDF exists rather than leaving the reader to
  * discover a rejected upload.
  *
- * Bleed is deliberately not modelled. It only matters when artwork runs to the
- * edge of the page, and galley does not place images at all, so offering a
- * bleed control would imply a capability that does not exist.
+ * Bleed is still not modelled, but the reason has changed now that galley does
+ * place images. It is no longer "there is no artwork" — it is that bleed
+ * requires artwork deliberately drawn past the trim edge, and every figure
+ * galley sets is placed INSIDE the text block, capped at \linewidth. Nothing
+ * it can currently produce reaches the page edge, so a bleed control would
+ * still describe a capability that is not there.
+ *
+ * If full-bleed placement is ever offered, this becomes real work: KDP wants
+ * 0.125 in on the three outer edges and a correspondingly larger trim.
  */
 
 /** Inside (gutter) margin required for a given finished page count, in inches. */

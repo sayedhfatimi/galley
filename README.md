@@ -104,11 +104,12 @@ document the moment you paste it, without opening the configuration at all.
 | Tables | GFM pipe tables, including column alignment |
 | Block quotes | Set as quotations, not as boxes |
 | Code blocks | Fenced, with long lines wrapped rather than run off the page |
-| Links | The URL is footnoted so it survives being printed |
+| Links | The URL is footnoted so it survives printing — switchable off for screen reading |
 | Footnotes | `[^ref]` and its definition |
 | Reference links | `[text][ref]` — resolved to ordinary links |
 | Maths | Inline `$…$` and display `$$…$$` — see below |
 | Horizontal rules | |
+| Images | Dropped or pasted in — PNG, JPEG, PDF. A lone image becomes a captioned figure |
 | Unicode | Accented names and curly quotes typeset natively, no escaping required |
 
 Special characters that mean something to LaTeX — `# $ % & _ { } ~ ^ \` — are escaped for
@@ -153,6 +154,8 @@ edit is serialised straight back to it.
 - **Em and en dashes** — the `—` and `–` buttons, since a keyboard has neither. Typing
   `---` and `--` also works.
 - **Open a file** — the upload button, or just drag a `.md` file onto the editor.
+- **Add a figure** — drop or paste an image (PNG, JPEG, PDF). It is kept in this browser,
+  previewed in place, and set as a captioned figure using the alt text.
 - **Help** — the `?` button lists every shortcut and slash command.
 - **Clear the document** — the bin, far right and deliberately separated from the
   formatting tools. It asks first.
@@ -168,6 +171,14 @@ two-sided margins, a table of contents and chapters opening on the right.
 
 **Page size** — A4, US Letter, A5, B5, Digest (5.5 × 8.5 in), US Trade (6 × 9 in),
 Royal (156 × 234 mm), Demy (138 × 216 mm).
+
+**Typeface** — Latin Modern, Pagella (Palatino), Termes (Times), Schola (Century
+Schoolbook) or Bonum (Bookman). Each is a complete serif, sans and mono pairing, previewed
+in its own face in the menu. Only the one you choose is downloaded. Mathematics stays
+Computer Modern whichever you pick.
+
+**Margins** — four fields, labelled Inner and Outer on a two-sided document and Left and
+Right otherwise, matching how the geometry is written into the `.tex`.
 
 **Text size** — 10, 11 or 12 pt. **Line spacing** — single, one and a half, or double.
 
@@ -216,10 +227,14 @@ minimums are met.
 
 **Download .pdf** — the finished document.
 
-**Download .tex** — the LaTeX that produced it, always available, *including when the render
-fails*. That is deliberate: a failed compile must not leave you with nothing. The preamble
-is organised and commented for a human reader, so changing the geometry or fonts by hand is
-straightforward.
+**Download the source** — the LaTeX that produced it, always available, *including when the
+render fails*. That is deliberate: a failed compile must not leave you with nothing. The
+preamble is organised and commented for a human reader, so changing the geometry or fonts
+by hand is straightforward.
+
+A document with figures comes down as a `.zip` holding the `.tex` and the images it names,
+because a `.tex` on its own would reference files you do not have. One without figures
+stays a plain `.tex`.
 
 The `.tex` is standard LaTeX and compiles with any XeLaTeX installation:
 
@@ -229,12 +244,16 @@ xelatex your-document.tex
 
 ## Limits and known gaps
 
-- **Images are not supported.** Each one is marked in the output so you can see where it
-  belongs, and a notice tells you which file was referenced. You can dismiss the notice.
+- **Only files you attach become figures.** An image the Markdown points at by URL is
+  never fetched — galley does not reach the network on behalf of a document you pasted —
+  so it is marked in the output instead. PNG, JPEG and PDF are supported.
 - **Raw HTML is not typeset** — it comes through as literal text, with a notice.
-- **Greek lowercase does not render.** The bundled Latin Modern fonts have no lowercase
-  Greek coverage, so a word like `Ωμέγα` loses everything after the capital. Greek letters
-  *inside maths* are fine — this affects Greek in body text only.
+- **Accented Greek does not render.** Choosing a TeX Gyre typeface gets you the Greek
+  letters, Α–Ω and α–ω, which Latin Modern lacks entirely. None of the bundled faces
+  carry a precomposed accented form, so `Ωμέγα` still loses its `έ` — and since monotonic
+  Greek is accented on nearly every word, galley cannot set Greek *prose*. Greek inside
+  maths is unaffected.
+- **Mathematics is always Computer Modern**, whichever typeface you choose.
 - **A mixed list looks wrong in the editor.** A list mixing plain items and task items
   shows every item as a checkbox. The LaTeX and the PDF are correct; only the editor
   display is affected.

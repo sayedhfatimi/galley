@@ -15,6 +15,7 @@ import { parseMarkdown } from '@/core/markdown/parse'
 import { mdastToPm } from '@/core/markdown/pm/mdast-to-pm'
 import { serializeToMarkdown } from '@/core/markdown/pm/serialize'
 import { cn } from '@/lib/utils'
+import { attachImage, imageFilesFrom } from './attachImage'
 import { EditorStatusBar } from './EditorStatusBar'
 import { EditorToc } from './EditorToc'
 import { createExtensions } from './extensions'
@@ -52,9 +53,16 @@ export interface MarkdownEditorProps {
   value: string
   onChange: (markdown: string) => void
   onFileName?: (name: string) => void
+  /** Fired when a figure is attached, so the caller can re-read the store. */
+  onImagesChanged?: () => void
 }
 
-export function MarkdownEditor({ value, onChange, onFileName }: MarkdownEditorProps) {
+export function MarkdownEditor({
+  value,
+  onChange,
+  onFileName,
+  onImagesChanged,
+}: MarkdownEditorProps) {
   const [mode, setMode] = useState<'rich' | 'source'>('rich')
   const [tocOpen, setTocOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -80,6 +88,11 @@ export function MarkdownEditor({ value, onChange, onFileName }: MarkdownEditorPr
     [],
   )
 
+  // addImages needs the editor, and the editor's paste handler needs
+  // addImages. A ref breaks the cycle without rebuilding the editor, which
+  // would discard the document.
+  const pasteImages = useRef<((files: File[]) => Promise<void>) | null>(null)
+
   const editor = useEditor({
     extensions,
     content: mdastToPm(parseMarkdown(value)),
@@ -87,6 +100,16 @@ export function MarkdownEditor({ value, onChange, onFileName }: MarkdownEditorPr
       attributes: {
         class:
           'prose-editor mx-auto h-full max-w-3xl px-6 py-8 text-sm focus:outline-none',
+      },
+      // A pasted screenshot arrives as a file on the clipboard with no name of
+      // its own. Handled here rather than left to ProseMirror, which would drop
+      // it silently — the same silence the image node was written to avoid.
+      handlePaste: (_view, event) => {
+        const files = imageFilesFrom(event.clipboardData?.items ?? null)
+        if (files.length === 0) return false
+        event.preventDefault()
+        void pasteImages.current?.(files)
+        return true
       },
     },
     onUpdate: ({ editor }) => {
@@ -152,6 +175,29 @@ export function MarkdownEditor({ value, onChange, onFileName }: MarkdownEditorPr
     [onChange, onFileName],
   )
 
+  /**
+   * Attached images, kept in this browser and inserted as figures. Sequential
+   * rather than parallel so the first failure — a full quota, say — stops
+   * before filling storage with the rest.
+   */
+  const addImages = useCallback(
+    async (files: File[]) => {
+      if (!editor) return
+      for (const file of files) {
+        const result = await attachImage(editor, file)
+        if (!result.ok) {
+          setFileError(result.reason)
+          return
+        }
+      }
+      setFileError(null)
+      onImagesChanged?.()
+    },
+    [editor, onImagesChanged],
+  )
+
+  pasteImages.current = addImages
+
   const openFile = useCallback(() => fileInput.current?.click(), [])
 
   // Confirmed rather than immediate. The document is the only thing the reader
@@ -193,7 +239,7 @@ export function MarkdownEditor({ value, onChange, onFileName }: MarkdownEditorPr
             <DialogTitle>Clear the document?</DialogTitle>
             <DialogDescription>
               This removes everything in the editor. galley keeps no copy, so it cannot be
-              undone — download the .tex first if you want to keep it.
+              undone — download the source first if you want to keep it.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -222,6 +268,14 @@ export function MarkdownEditor({ value, onChange, onFileName }: MarkdownEditorPr
         onDrop={(e) => {
           e.preventDefault()
           setDragging(false)
+          // An image joins the document; anything else is opened AS the
+          // document. Dropping a photo used to replace the manuscript with its
+          // bytes, which is never what the gesture means.
+          const images = imageFilesFrom(e.dataTransfer.files)
+          if (images.length > 0 && editor) {
+            void addImages(images)
+            return
+          }
           const file = e.dataTransfer.files[0]
           if (file) void readFile(file)
         }}

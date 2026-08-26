@@ -21,6 +21,12 @@ export interface ConvertResult {
   diagnostics: Diagnostic[]
   /** Metadata found in frontmatter, for pre-filling the configuration panel. */
   frontmatter: Metadata
+  /**
+   * Sanitised names of the images this document draws. The caller supplies
+   * exactly these to the engine — a document referencing one figure should not
+   * drag every image the reader has ever attached into the compile.
+   */
+  images: string[]
   hasFrontmatter: boolean
 }
 
@@ -35,10 +41,15 @@ export function readFrontmatter(source: string): Metadata {
   return extractFrontmatter(parseMarkdown(source))
 }
 
-export function convert(source: string, config: GalleyConfig): ConvertResult {
+export function convert(
+  source: string,
+  config: GalleyConfig,
+  /** Image names the caller holds bytes for; omit when it cannot know. */
+  available?: ReadonlySet<string>,
+): ConvertResult {
   const tree = parseMarkdown(source)
   const frontmatter = extractFrontmatter(tree)
-  const { body, diagnostics } = serializeToLatex(tree, config)
+  const { body, diagnostics, images } = serializeToLatex(tree, config, available)
 
   const { title, subtitle, author, date } = config.metadata
   const hasTitleBlock = Boolean(title || subtitle || author || date)
@@ -62,6 +73,7 @@ export function convert(source: string, config: GalleyConfig): ConvertResult {
     tex: parts.join('\n'),
     diagnostics,
     frontmatter,
+    images,
     hasFrontmatter: hasFrontmatter(tree),
   }
 }

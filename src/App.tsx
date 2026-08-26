@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { convert, readFrontmatter } from '@/core/latex/document'
+import { createZip } from '@/core/zip'
 import { ActionBar } from '@/ui/ActionBar'
 import { Diagnostics } from '@/ui/Diagnostics'
 import { MarkdownEditor } from '@/ui/editor/MarkdownEditor'
+import { listImageNames, loadImages } from '@/ui/lib/imageStore'
 import { useStore } from '@/ui/lib/store'
 import { useCompile } from '@/ui/lib/useCompile'
 import { ParticleBackground } from '@/ui/ParticleBackground'
@@ -42,21 +44,71 @@ export default function App() {
     if (Object.keys(found).length > 0) applyFrontmatter(found)
   }, [source, applyFrontmatter])
 
-  const { tex, diagnostics } = useMemo(() => convert(source, config), [source, config])
+  /**
+   * The images this browser actually holds bytes for.
+   *
+   * The conversion needs it: a name the store cannot supply must come out as a
+   * visible gap rather than an \includegraphics, because the engine stops the
+   * whole document on a missing picture. Null while it is still being read,
+   * which the converter reads as "assume present" — the same behaviour as
+   * before, for the moment it takes to answer.
+   */
+  const [attached, setAttached] = useState<string[] | null>(null)
+  const refreshAttached = useCallback(() => {
+    void listImageNames().then(setAttached)
+  }, [])
+  useEffect(refreshAttached, [refreshAttached])
+
+  const { tex, diagnostics, images } = useMemo(
+    () => convert(source, config, attached ? new Set(attached) : undefined),
+    [source, config, attached],
+  )
   const compile = useCompile()
 
-  const downloadTex = () => {
-    const url = URL.createObjectURL(new Blob([tex], { type: 'application/x-tex' }))
+  const save = (blob: Blob, extension: string) => {
+    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${fileName}.tex`
+    a.download = `${fileName}.${extension}`
     a.click()
     URL.revokeObjectURL(url)
   }
 
-  const render = () => {
+  /**
+   * The source, and the images it names.
+   *
+   * A `.tex` on its own stopped being a complete handover the moment galley
+   * could place a figure — it would name files the recipient does not have. So
+   * a document WITH figures is given as a zip, and one without stays a plain
+   * `.tex`, because a zip containing a single file is a worse thing to receive.
+   */
+  const downloadTex = async () => {
+    const attached = await loadImages(images)
+    if (attached.length === 0) {
+      save(new Blob([tex], { type: 'application/x-tex' }), 'tex')
+      return
+    }
+    const now = new Date()
+    const archive = createZip(
+      [{ name: `${fileName}.tex`, bytes: new TextEncoder().encode(tex) }, ...attached],
+      {
+        year: now.getFullYear(),
+        month: now.getMonth() + 1,
+        day: now.getDate(),
+        hours: now.getHours(),
+        minutes: now.getMinutes(),
+        seconds: now.getSeconds(),
+      },
+    )
+    save(new Blob([archive], { type: 'application/zip' }), 'zip')
+  }
+
+  const render = async () => {
     setResultOpen(true)
-    compile.compile(tex)
+    // Only what this document actually draws. A reader who has attached twenty
+    // figures over a week should not push all twenty through the engine to
+    // render the one page that uses two.
+    compile.compile(tex, await loadImages(images))
   }
 
   return (
@@ -66,6 +118,7 @@ export default function App() {
       <div className="relative z-10 flex h-screen flex-col overflow-hidden">
         <ActionBar
           tex={tex}
+          hasImages={images.length > 0}
           busy={compile.state === 'running'}
           onRender={render}
           onDownloadTex={downloadTex}
@@ -76,6 +129,7 @@ export default function App() {
             value={source}
             onChange={setSource}
             onFileName={(name) => setFileName(name.replace(/\.[^.]+$/, ''))}
+            onImagesChanged={refreshAttached}
           />
         </main>
 

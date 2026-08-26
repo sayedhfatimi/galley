@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CompileErrorReason, CompileResponse } from '@/workers/compile.worker'
+import type {
+  CompileErrorReason,
+  CompileImage,
+  CompileRequest,
+  CompileResponse,
+} from '@/workers/compile.worker'
 
 /**
  * Drives the compile worker.
@@ -76,7 +81,7 @@ export function useCompile() {
   }, [terminate])
 
   const compile = useCallback(
-    (tex: string) => {
+    (tex: string, images: CompileImage[] = []) => {
       // A worker is kept alive between renders so the engine and the TeX Live
       // files it has cached are not re-fetched on every press.
       if (!workerRef.current) {
@@ -165,7 +170,7 @@ export function useCompile() {
         }))
       }, TIMEOUT_MS)
 
-      worker.postMessage({ type: 'compile', tex })
+      worker.postMessage({ type: 'compile', tex, images } satisfies CompileRequest)
     },
     [cleanup, terminate],
   )

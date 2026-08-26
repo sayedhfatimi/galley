@@ -16,9 +16,16 @@
 const ENGINE_BASE = '/engines'
 const TEXLIVE_ENDPOINT = '/texlive/'
 
+/** An image the document draws, already named safely — see `core/images.ts`. */
+export interface CompileImage {
+  name: string
+  bytes: Uint8Array
+}
+
 export interface CompileRequest {
   type: 'compile'
   tex: string
+  images: CompileImage[]
 }
 
 export type CompileResponse =
@@ -38,6 +45,12 @@ interface Engine {
   setTexliveEndpoint(url: string): void
   writeMemFSFile(name: string, content: string | Uint8Array): void
   setEngineMainFile(name: string): void
+  /**
+   * Empty the working directory. Spares the fetched TeX Live cache, which is
+   * the expensive part and the reason the engines are kept alive at all.
+   * Present on dvipdfmx only via patch 8 — see public/engines/PATCHES.md.
+   */
+  flushCache(): void
   isReady(): boolean
   compileLaTeX(): Promise<{ status: number; pdf?: Uint8Array; log: string }>
   compilePDF(): Promise<{ status: number; pdf?: Uint8Array; log: string }>
@@ -125,11 +138,31 @@ function classify(log: string): { reason: CompileErrorReason; message: string } 
   }
 }
 
-async function compile(tex: string, post: (m: CompileResponse) => void): Promise<void> {
+async function compile(
+  tex: string,
+  images: CompileImage[],
+  post: (m: CompileResponse) => void,
+): Promise<void> {
   await ensureEngines(post)
   if (!xetex || !dvipdfm) throw new Error('engines unavailable')
 
   post({ type: 'progress', stage: 'typesetting', message: 'Typesetting…' })
+
+  // The engines outlive a render, so last render's files are still here. An
+  // image the reader has since deleted would go on being found, and — worse —
+  // an image REPLACED by a different file of the same name would leave the old
+  // bytes in dvipdfmx, which embeds them while XeTeX typesets the new picture.
+  // Flushing first is what makes each render independent of the last.
+  xetex.flushCache()
+  dvipdfm.flushCache()
+
+  // Both engines need every image: XeTeX reads it while typesetting and records
+  // a reference in the XDV, then dvipdfmx reads the bytes to embed at the PDF
+  // stage. Writing to only one typesets cleanly and fails at render.
+  for (const image of images) {
+    xetex.writeMemFSFile(image.name, image.bytes)
+    dvipdfm.writeMemFSFile(image.name, image.bytes)
+  }
 
   xetex.writeMemFSFile('main.tex', tex)
   xetex.setEngineMainFile('main.tex')
@@ -181,7 +214,7 @@ self.onmessage = async (event: MessageEvent<CompileRequest>) => {
   if (event.data?.type !== 'compile') return
   const post = (m: CompileResponse) => self.postMessage(m)
   try {
-    await compile(event.data.tex, post)
+    await compile(event.data.tex, event.data.images ?? [], post)
   } catch (error) {
     post({
       type: 'error',

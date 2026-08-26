@@ -250,7 +250,16 @@ export function HelpDialog({
               <div>
                 <p className="font-medium">Known limits</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5 text-muted-foreground">
-                  <li>Images are not supported yet; each one is marked in the output.</li>
+                  <li>
+                    Figures come from files you drop or paste in — PNG, JPEG and PDF. An
+                    image hosted elsewhere is never fetched, so it is marked in the output
+                    instead.
+                  </li>
+                  <li>
+                    Greek letters need a typeface that carries them; accented Greek, and
+                    scripts like Cyrillic and CJK, cannot be set at all.
+                  </li>
+                  <li>Mathematics is always set in Computer Modern.</li>
                   <li>Citations and bibliographies are planned, not present.</li>
                 </ul>
               </div>

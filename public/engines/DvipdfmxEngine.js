@@ -188,6 +188,20 @@ var DvipdfmxEngine = /** @class */ (function () {
             this.latexWorker.postMessage({ cmd: 'mkdir', url: folder });
         }
     };
+    /* galley patch 8: expose flushCache, which the worker already implements.
+       Upstream ships this on XeTeXEngine but not here, even though both workers
+       handle the same 'flushcache' command (cleanDir(WORKROOT)). Without it the
+       dvipdfmx side of a session accumulates every file ever written to it, and
+       that is a CORRECTNESS problem rather than a memory one: replacing an
+       image with a different file of the same name leaves the stale bytes here,
+       so XeTeX typesets the new picture and dvipdfmx embeds the old one. The
+       flush spares TEXCACHEROOT, so the fetched TeX Live cache survives. */
+    DvipdfmxEngine.prototype.flushCache = function () {
+        this.checkEngineStatus();
+        if (this.latexWorker !== undefined) {
+            this.latexWorker.postMessage({ 'cmd': 'flushcache' });
+        }
+    };
     DvipdfmxEngine.prototype.setTexliveEndpoint = function (url) {
         if (this.latexWorker !== undefined) {
             this.latexWorker.postMessage({ 'cmd': 'settexliveurl', 'url': url });

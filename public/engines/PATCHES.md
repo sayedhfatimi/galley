@@ -103,6 +103,25 @@ const _cands = reqname.indexOf(".") >= 0 ? [reqname] : _ext ? [reqname + _ext] :
 
 Generated rather than transcribed, deliberately — including upstream's own quirk that `kpse_cmap_format` appends `cmap` with no leading dot. A virtual-font request now resolves to `.vf`, misses cleanly, and never receives metrics in its place.
 
+## 8. `DvipdfmxEngine` could not flush its filesystem
+
+Upstream exposes `flushCache()` on `XeTeXEngine` but not on `DvipdfmxEngine`, although **both** workers implement the same `flushcache` command — `cleanDir(WORKROOT)`. Nothing needed it while the only file written was `main.xdv`, which is overwritten each run.
+
+Images changed that. They are written to both engines, because XeTeX reads an image while typesetting and records a reference in the XDV, and dvipdfmx then reads the actual bytes to embed at the PDF stage.
+
+Flushing only XeTeX looks sufficient, and is not. The visible fault — a deleted image still appearing — is XeTeX resolving `\includegraphics`, so flushing XeTeX alone appears to fix it. But replace an image with a *different* file of the same name: XeTeX is flushed and rewritten and typesets the new picture, while dvipdfmx still holds the old bytes and **embeds the previous image**. The document is wrong, silently, with no error anywhere.
+
+```js
+DvipdfmxEngine.prototype.flushCache = function () {
+    this.checkEngineStatus();
+    if (this.latexWorker !== undefined) {
+        this.latexWorker.postMessage({ 'cmd': 'flushcache' });
+    }
+};
+```
+
+`cleanDir` spares `TEXCACHEROOT`, so this evicts the work directory without discarding the fetched TeX Live cache — the expensive thing, and the reason the worker is kept alive between renders at all.
+
 ## Rebuilding the format
 
 `swiftlatexxetex.fmt` in `public/texlive/` must be built **by the wasm engine itself** — a TeX Live `xelatex.fmt` will not load, because format files are engine-specific. See `scripts/README.md`.
