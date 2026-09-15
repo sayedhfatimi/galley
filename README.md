@@ -97,6 +97,54 @@ date: 2026-08-06                           # or: created, published
 A note exported from Obsidian or a similar app should therefore produce a correctly titled
 document the moment you paste it, without opening the configuration at all.
 
+### Structure
+
+In a Book or Report, `#` is a chapter (see the table above). Left alone, every chapter is
+numbered and counted in the contents — the ordinary case, needing nothing from you. A real
+book usually needs more than that: a copyright page, a dedication, an appendix, none of
+which belong among the numbered chapters, and any of which can be moved into **front
+matter** or **back matter**.
+
+Tell galley by adding a `structure:` block to your frontmatter, keyed by the chapter's own
+heading text:
+
+```yaml
+---
+title: The Philosophy of Illusions
+structure:
+  Copyright: { role: front, listed: false }
+  Dedication: { role: front }
+  "Introduction: Reality is a Stage": { role: front, toc_title: Introduction }
+  About the Author: { role: back }
+---
+```
+
+Each entry sets a **role** — `front`, `main` or `back` — plus two independent switches.
+**Front and back matter are unnumbered by default**, because that is what the division
+means; main matter is numbered. Either can be overridden. A part can be kept **out of the
+contents** with `listed: false`, which is how the Copyright page above is handled.
+`toc_title` gives a **shorter contents entry** than the heading, which is how a long chapter
+title is kept readable on the contents page — it works on numbered chapters too. Anything
+not named is an ordinary numbered, listed chapter, so a document that says nothing about
+structure is completely unchanged.
+
+**Front and back matter exist only in a Book.** Ask for them in an Article or Report and
+galley says so rather than silently ignoring it.
+
+**The Structure section of the Configure dialog writes this block for you**, so nobody has
+to type YAML. It lists the document's own headings, so the two cannot drift apart.
+
+**galley tells you when it cannot do what the block asks.** A part named here that no
+longer matches a heading loses its setting — renaming a heading does that — and galley says
+so instead of pretending nothing changed. Two headings sharing a title are governed by the
+one setting between them, since the block is keyed by text. Parts written out of book order
+are typeset in the order you wrote them rather than rearranged, with a notice that they are
+out of order. And a numbered chapter cannot be kept out of the contents — LaTeX will not
+allow it — so make it unnumbered instead if that is what you want.
+
+If galley cannot parse your frontmatter at all, the Structure section says so and offers no
+controls, rather than controls that would quietly do nothing.
+
 ## What galley supports
 
 | Construct | Notes |
@@ -226,6 +274,9 @@ Right otherwise, matching how the geometry is written into the `.tex`.
 **Two-sided** — margins alternate for binding, and running heads differ on facing pages.
 
 **Table of contents** — generated from your headings.
+
+**Number sections** — on by default. Turn it off to title sections without numbering them;
+chapters stay numbered, and sections still appear in the contents.
 
 **Chapters start a new page** — on by default for books and reports. Turn it off and
 chapters run on instead, like sections. *(In LaTeX a chapter always breaks the page; galley
