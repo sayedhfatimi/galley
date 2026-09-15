@@ -158,6 +158,14 @@ describe('buildPreamble', () => {
         'tocdepth',
       )
     })
+
+    // The reference manuscript this feature was built against — a published
+    // 90,000-word book — has a contents page listing chapters only. A fresh
+    // Book preset must reproduce that rather than the section-inclusive depth
+    // a Report defaults to.
+    it('a Book preset lists chapters only by default', () => {
+      expect(buildPreamble(presetFor('book'))).toContain('\\setcounter{tocdepth}{0}')
+    })
   })
 
   describe('section numbering (Fix 7)', () => {

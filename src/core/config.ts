@@ -192,7 +192,9 @@ export function presetFor(character: DocumentCharacter): GalleyConfig {
         margins: { top: 20, bottom: 22, inner: 22, outer: 18, unit: 'mm' },
         twoSided: true,
         lineSpacing: 'onehalf',
-        toc: { include: true, depth: 1 },
+        // A trade book's contents page lists chapters only, not every section —
+        // depth 0 is level 0 (\chapter) in the book class. See usesChapters.
+        toc: { include: true, depth: 0 },
         chapters: { startOnNewPage: true, forceRecto: true },
       }
     case 'report':

@@ -277,7 +277,15 @@ Right otherwise, matching how the geometry is written into the `.tex`.
 
 **Two-sided** — margins alternate for binding, and running heads differ on facing pages.
 
-**Table of contents** — generated from your headings.
+**Table of contents** — generated from your headings, printed just after the title page.
+
+**Contents lists** — how far down it goes. In a Book or Report this reads Chapters only,
+Chapters and sections, or Chapters, sections and subsections; in an Article, which has no
+chapter, it reads Sections only, Sections and subsections, or down to sub-subsections. A
+Book defaults to chapters only, which is how a printed book's contents page normally
+reads — a novel-length manuscript with a contents page listing every section under every
+chapter is not what a reader expects to find inside a hardback. Only available once Table
+of contents is switched on.
 
 **Number sections** — on by default. Turn it off to title sections without numbering them;
 chapters stay numbered, and sections still appear in the contents.

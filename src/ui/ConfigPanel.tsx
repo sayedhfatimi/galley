@@ -63,6 +63,27 @@ const CHARACTERS: { value: DocumentCharacter; label: string; hint: string }[] = 
 ]
 
 /**
+ * What `\setcounter{tocdepth}` means depends on the document character:
+ * `\chapter` is level 0 in Book and Report, but Article has no chapter, so
+ * `\section` is level 1 there. The same number therefore means something
+ * different in each — and `tocdepth: 0` in an Article lists nothing at all,
+ * an empty contents page. So each character gets its own menu, worded in
+ * what actually appears rather than in the shared number, and an Article's
+ * menu simply never offers the value that would produce that trap.
+ */
+const CHAPTER_TOC_DEPTHS: { value: number; label: string }[] = [
+  { value: 0, label: 'Chapters only' },
+  { value: 1, label: 'Chapters and sections' },
+  { value: 2, label: 'Chapters, sections and subsections' },
+]
+
+const ARTICLE_TOC_DEPTHS: { value: number; label: string }[] = [
+  { value: 1, label: 'Sections only' },
+  { value: 2, label: 'Sections and subsections' },
+  { value: 3, label: 'Sections, subsections and sub-subsections' },
+]
+
+/**
  * One-click setup for an Amazon KDP paperback.
  *
  * The inside margin KDP requires depends on the finished page count, which is
@@ -630,10 +651,34 @@ export function ConfigPanel({
         <ToggleRow
           id="toc"
           label="Table of contents"
-          hint={`Listed to depth ${config.toc.depth}`}
+          hint="Printed just after the title page"
           checked={config.toc.include}
           onChange={(v) => set('toc', { ...config.toc, include: v })}
         />
+
+        <Field label="Contents lists">
+          <Select
+            value={String(config.toc.depth)}
+            disabled={!config.toc.include}
+            onValueChange={(v) => set('toc', { ...config.toc, depth: Number(v) })}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(chapters ? CHAPTER_TOC_DEPTHS : ARTICLE_TOC_DEPTHS).map((d) => (
+                <SelectItem key={d.value} value={String(d.value)}>
+                  {d.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!config.toc.include && (
+            <p className="mt-1.5 text-muted-foreground text-xs">
+              Needs Table of contents turned on above
+            </p>
+          )}
+        </Field>
 
         <ToggleRow
           id="number-sections"
