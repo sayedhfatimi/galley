@@ -49,27 +49,39 @@ function toDisplayString(value: unknown): string | undefined {
 }
 
 /**
- * Read metadata from a document's frontmatter.
+ * The document's frontmatter as a plain object, or null when there is none,
+ * when it is malformed, or when it is not a mapping.
  *
- * Returns an empty object when there is no frontmatter, when it is malformed, or
- * when it holds nothing galley recognises.
+ * Exported because more than metadata lives in frontmatter now — `structure.ts`
+ * reads the part list from the same block, and parsing the YAML twice would let
+ * the two disagree about what a malformed block means.
  */
-export function extractFrontmatter(tree: Root): Metadata {
+export function frontmatterData(tree: Root): Record<string, unknown> | null {
   const node = firstYamlNode(tree)
-  if (!node) return {}
+  if (!node) return null
 
   let data: unknown
   try {
     data = parseYaml(node.value)
   } catch {
     // Malformed frontmatter is not a failure — the document still converts.
-    return {}
+    return null
   }
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) return {}
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return null
+  return data as Record<string, unknown>
+}
 
-  const record = data as Record<string, unknown>
+/**
+ * Read metadata from a document's frontmatter.
+ *
+ * Returns an empty object when there is no frontmatter, when it is malformed, or
+ * when it holds nothing galley recognises.
+ */
+export function extractFrontmatter(tree: Root): Metadata {
+  const record = frontmatterData(tree)
+  if (!record) return {}
+
   const metadata: Metadata = {}
-
   for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
     for (const key of aliases) {
       const found = toDisplayString(record[key])
@@ -79,7 +91,6 @@ export function extractFrontmatter(tree: Root): Metadata {
       }
     }
   }
-
   return metadata
 }
 
