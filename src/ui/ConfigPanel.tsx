@@ -383,6 +383,14 @@ export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
           onChange={(v) => set('toc', { ...config.toc, include: v })}
         />
 
+        <ToggleRow
+          id="number-sections"
+          label="Number sections"
+          hint="Turn off to title sections without numbering them"
+          checked={config.sections.numbered}
+          onChange={(v) => set('sections', { ...config.sections, numbered: v })}
+        />
+
         {chapters && (
           <ToggleRow
             id="chapter-page"

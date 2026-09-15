@@ -205,4 +205,21 @@ describe('mergePersisted', () => {
     )
     expect(mergePersisted({}, current).config.typeface).toBe(DEFAULT_CONFIG.typeface)
   })
+
+  it('backfills sections for a config stored before it existed', () => {
+    const current = useStore.getState()
+    const stored = {
+      source: 'old work',
+      fileName: 'old',
+      theme: 'dark' as const,
+      config: { ...DEFAULT_CONFIG, fontSize: 12 as const },
+    }
+    delete (stored.config as { sections?: unknown }).sections
+
+    const merged = mergePersisted(stored, current)
+
+    expect(merged.config.sections).toEqual({ numbered: true })
+    // The reader's own choices still survive the backfill.
+    expect(merged.config.fontSize).toBe(12)
+  })
 })
