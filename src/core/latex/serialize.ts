@@ -193,7 +193,7 @@ class Serializer {
     for (const title of duplicated) {
       this.#diagnostics.add(
         'structure-duplicate-heading',
-        'Two chapters share this title, and one setting governs every heading with the same text. Give one of them a different title to set them separately.',
+        'Two headings share this title, and one setting governs every heading with the same text. Give one of them a different title to set them separately.',
         title,
       )
     }
