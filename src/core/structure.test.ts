@@ -7,8 +7,12 @@ import {
   DEFAULT_PART,
   headingText,
   type PartSpec,
+  parseWritableFrontmatter,
+  partSpecFields,
   readStructure,
+  resolvePart,
   roleRank,
+  writeFrontmatterKey,
   writeStructure,
 } from './structure'
 
@@ -346,5 +350,83 @@ describe('canWriteStructure', () => {
     // What we expect them to agree ON, so a fixture that accidentally pins
     // both sides to the same wrong answer still fails.
     expect(canWriteStructure(source)).toBe(writable)
+  })
+})
+
+describe('shared guards', () => {
+  it('exposes the writability guard that canWriteStructure uses', () => {
+    // A duplicate key makes the document unparseable-for-rewrite.
+    expect(parseWritableFrontmatter('a: 1\na: 2')).toBeNull()
+    expect(parseWritableFrontmatter('title: A book')).not.toBeNull()
+    expect(parseWritableFrontmatter(null)).not.toBeNull()
+  })
+
+  it('exposes the role defaulting readStructure uses', () => {
+    expect(resolvePart({})).toEqual({ role: 'main', numbered: true, listed: true })
+    expect(resolvePart({ role: 'front' })).toEqual({
+      role: 'front',
+      numbered: false,
+      listed: true,
+    })
+  })
+
+  // partSpecFields is the inverse of resolvePart. Pinning the round trip is
+  // what stops the two drifting: a field the writer omits must be one the
+  // reader defaults back to the same value.
+  it('round-trips every PartSpec through partSpecFields and resolvePart', () => {
+    const specs: PartSpec[] = [
+      { role: 'main', numbered: true, listed: true },
+      { role: 'front', numbered: false, listed: true },
+      { role: 'front', numbered: true, listed: true },
+      { role: 'back', numbered: false, listed: false },
+      { role: 'main', numbered: true, listed: true, tocTitle: 'Short' },
+    ]
+    for (const spec of specs) {
+      expect(resolvePart(partSpecFields(spec))).toEqual(spec)
+    }
+  })
+
+  it('omits fields that match the role default', () => {
+    expect(partSpecFields({ role: 'front', numbered: false, listed: true })).toEqual({
+      role: 'front',
+    })
+    expect(partSpecFields({ role: 'main', numbered: true, listed: true })).toEqual({
+      role: 'main',
+    })
+  })
+})
+
+describe('writeFrontmatterKey', () => {
+  it('adds a key to a document with no frontmatter', () => {
+    expect(writeFrontmatterKey('# C\n', 'x', { a: 1 })).toContain('x:')
+  })
+
+  it('preserves other keys and comments', () => {
+    const out = writeFrontmatterKey('---\n# note\ntitle: T\n---\n\n# C\n', 'x', { a: 1 })
+    expect(out).toContain('# note')
+    expect(out).toContain('title: T')
+  })
+
+  // The v2.1.0 bug this exists once to prevent: deleting the last real key
+  // from a comment-only frontmatter left an empty map, whose literal `{}`
+  // shipped in the writer's manuscript alongside their comment.
+  it('strips the empty-document token but keeps a comment', () => {
+    const out = writeFrontmatterKey('---\n# note\nx: 1\n---\n\n# C\n', 'x', null)
+    expect(out).toContain('# note')
+    expect(out).not.toContain('{}')
+    expect(out).not.toContain('null')
+  })
+
+  it('drops the fence entirely when nothing is left', () => {
+    expect(writeFrontmatterKey('---\nx: 1\n---\n\n# C\n', 'x', null)).toBe('# C\n')
+  })
+
+  it('returns the source unchanged when the frontmatter cannot be rewritten', () => {
+    const src = '---\na: 1\na: 2\n---\n\n# C\n'
+    expect(writeFrontmatterKey(src, 'x', { a: 1 })).toBe(src)
+  })
+
+  it('returns the source unchanged when removing a key from no frontmatter', () => {
+    expect(writeFrontmatterKey('# C\n', 'x', null)).toBe('# C\n')
   })
 })

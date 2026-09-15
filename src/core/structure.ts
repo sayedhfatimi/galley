@@ -16,7 +16,7 @@
  */
 
 import type { Heading, Nodes } from 'mdast'
-import { Document, isMap, parseDocument } from 'yaml'
+import { Document, isMap, isScalar, parseDocument } from 'yaml'
 import { joinFrontmatter, splitFrontmatter } from './markdown/split'
 
 export type PartRole = 'front' | 'main' | 'back'
@@ -42,8 +42,11 @@ const ROLES: readonly PartRole[] = ['front', 'main', 'back']
  * clobbering a deliberate override). That duplication is a known, accepted
  * layering concern — see Fix 2 of the book-structure branch review — but it
  * means a change to the rule here must be carried over there by hand.
+ *
+ * Exported so the per-file `galley:` block in `src/core/project/spec.ts`
+ * applies the same defaults rather than restating them.
  */
-function resolvePart(raw: Record<string, unknown>): PartSpec {
+export function resolvePart(raw: Record<string, unknown>): PartSpec {
   const declared = raw.role
   const role: PartRole =
     typeof declared === 'string' && (ROLES as readonly string[]).includes(declared)
@@ -61,6 +64,24 @@ function resolvePart(raw: Record<string, unknown>): PartSpec {
   return tocTitle === undefined
     ? { role, numbered, listed }
     : { role, numbered, listed, tocTitle }
+}
+
+/**
+ * A PartSpec as it is written into frontmatter — the inverse of `resolvePart`.
+ *
+ * Only what DIFFERS from the role's own default is written, so the file stays
+ * readable and reading it back yields the identical spec. Kept beside
+ * `resolvePart` and pinned against it by a round-trip test, because "what does
+ * `{ role: front }` mean" must be answered in exactly one place: it is written
+ * here and read there, and a field one omits must be a field the other
+ * defaults to the same value.
+ */
+export function partSpecFields(spec: PartSpec): Record<string, unknown> {
+  const fields: Record<string, unknown> = { role: spec.role }
+  if (spec.numbered !== (spec.role === 'main')) fields.numbered = spec.numbered
+  if (!spec.listed) fields.listed = false
+  if (spec.tocTitle) fields.toc_title = spec.tocTitle
+  return fields
 }
 
 /**
@@ -155,7 +176,7 @@ export function roleRank(role: PartRole): number {
  * insurance against a `yaml` edge case neither of them anticipated. This
  * function is therefore TOTAL: it must never throw.
  */
-function parseWritableFrontmatter(frontmatter: string | null) {
+export function parseWritableFrontmatter(frontmatter: string | null) {
   try {
     const doc = frontmatter === null ? new Document({}) : parseDocument(frontmatter)
 
@@ -176,6 +197,76 @@ function parseWritableFrontmatter(frontmatter: string | null) {
     return doc
   } catch {
     return null
+  }
+}
+
+/**
+ * Write one key into a document's frontmatter, or with `null` remove it,
+ * leaving everything else — other keys, their order, and the writer's comments
+ * — exactly as it was. TOTAL: never throws; an unwritable document comes back
+ * unchanged.
+ *
+ * One routine rather than one per caller. The emptiness handling below is
+ * subtle and was got wrong once already: a frontmatter that is only a comment
+ * parses to `contents === null`, but deleting the last real key from it leaves
+ * an EMPTY MAP rather than reverting to null, and `yaml` stringifies that as a
+ * literal `{}` — which went out in a writer's manuscript alongside their
+ * comment. Three copies of this would be three chances to get it wrong again.
+ *
+ * A second, related subtlety: `yaml` attaches a comment written directly
+ * above a key to that key's OWN node, not to the document. Deleting that key
+ * therefore deletes its comment too, unless it is rescued first — so a
+ * comment sitting right above the key being removed is moved onto the
+ * document itself before the delete, and survives even once the map it was
+ * written in is gone.
+ */
+export function writeFrontmatterKey(
+  source: string,
+  key: string,
+  value: unknown | null,
+): string {
+  const { frontmatter, body } = splitFrontmatter(source)
+  if (frontmatter === null && value === null) return source
+
+  const doc = parseWritableFrontmatter(frontmatter)
+  if (doc === null) return source
+
+  try {
+    if (value === null) {
+      const orphaned =
+        isMap(doc.contents) &&
+        doc.contents.items.find((item) => isScalar(item.key) && item.key.value === key)
+          ?.key
+      const comment = orphaned && isScalar(orphaned) ? orphaned.commentBefore : undefined
+      doc.delete(key)
+      if (comment) {
+        doc.commentBefore = doc.commentBefore
+          ? `${doc.commentBefore}\n${comment}`
+          : comment
+      }
+    } else {
+      doc.set(key, value)
+    }
+
+    // Judged by `doc.contents` itself — null before any key exists, or an
+    // emptied map once the last is removed — NOT by string-comparing the
+    // output, which only ever matched a frontmatter with nothing else in it.
+    const empty =
+      doc.contents === null || (isMap(doc.contents) && doc.contents.items.length === 0)
+
+    let yaml = doc.toString().trimEnd()
+    if (empty) {
+      // Strip only that trailing token; anything before it, such as a
+      // comment, is the writer's own and must stay.
+      yaml = yaml.replace(/\n*(?:\{\}|null)$/, '').trimEnd()
+    }
+
+    if (yaml === '') return body
+    return joinFrontmatter(yaml, body)
+  } catch {
+    // Backstop. Any `yaml` edge case the checks above did not anticipate falls
+    // back to the one answer that is always safe: the manuscript, unchanged.
+    return source
   }
 }
 
@@ -219,56 +310,9 @@ export function canWriteStructure(source: string): boolean {
  * docstring.
  */
 export function writeStructure(source: string, structure: Map<string, PartSpec>): string {
-  const { frontmatter, body } = splitFrontmatter(source)
-  if (frontmatter === null && structure.size === 0) return source
+  if (structure.size === 0) return writeFrontmatterKey(source, 'structure', null)
 
-  const doc = parseWritableFrontmatter(frontmatter)
-  if (doc === null) return source
-
-  try {
-    const block: Record<string, Record<string, unknown>> = {}
-    for (const [heading, part] of structure) {
-      const entry: Record<string, unknown> = { role: part.role }
-      if (part.numbered !== (part.role === 'main')) entry.numbered = part.numbered
-      if (!part.listed) entry.listed = false
-      if (part.tocTitle) entry.toc_title = part.tocTitle
-      block[heading] = entry
-    }
-
-    if (structure.size === 0) doc.delete('structure')
-    else doc.set('structure', block)
-
-    // Whether anything is left worth a fence pair, judged by `doc.contents`
-    // itself — null before any key exists, or an emptied map once the last
-    // key is removed — NOT by string-comparing the stringified output. The
-    // old comparison (`yaml === '' || yaml === '{}'`) only ever matched a
-    // frontmatter with nothing else in it. A frontmatter that was only ever
-    // a comment ALSO parses to `contents === null`, but deleting the last
-    // real key from it leaves an empty map rather than reverting to null, so
-    // `doc.toString()` for THAT case is neither `''` nor `'{}'` — it is the
-    // comment followed by an empty map. The old check missed it, and the
-    // empty map's own `{}` went out in the writer's manuscript alongside
-    // their comment.
-    const empty =
-      doc.contents === null || (isMap(doc.contents) && doc.contents.items.length === 0)
-
-    let yaml = doc.toString().trimEnd()
-    if (empty) {
-      // `yaml` itself does not round-trip a content-free document cleanly:
-      // an empty map stringifies as a literal `{}`, contents of `null` as a
-      // literal `null` — neither of which the writer typed. Strip only that
-      // trailing token; anything before it, such as a comment, is the
-      // writer's own and must stay (see the reproduction in
-      // structure.test.ts, where the comment survives but the `{}` must not).
-      yaml = yaml.replace(/\n*(?:\{\}|null)$/, '').trimEnd()
-    }
-
-    if (yaml === '') return body
-    return joinFrontmatter(yaml, body)
-  } catch {
-    // Backstop only — see `parseWritableFrontmatter`'s docstring. Any future
-    // `yaml` edge case the checks there did not anticipate falls back to the
-    // one answer that is always safe: the writer's manuscript, unchanged.
-    return source
-  }
+  const block: Record<string, Record<string, unknown>> = {}
+  for (const [heading, part] of structure) block[heading] = partSpecFields(part)
+  return writeFrontmatterKey(source, 'structure', block)
 }
