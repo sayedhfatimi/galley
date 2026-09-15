@@ -13,6 +13,12 @@
  * chapters must not depend on which.
  */
 const COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'variant' })
+// Note this cannot be unit-tested from inside one environment: pinning the
+// locale buys agreement BETWEEN environments, and a test asserting that 'en'
+// differs from the ambient locale would just encode the test machine's own
+// locale. Measured on one such machine, ambient resolved to en-GB and agreed
+// with 'en' on every sample — which is exactly why the pin is a stated
+// invariant rather than an assertion.
 
 export function partOrder(paths: readonly string[]): string[] {
   return [...paths].sort((a, b) => {

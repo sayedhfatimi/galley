@@ -22,6 +22,15 @@ describe('partOrder', () => {
     expect(once).toEqual(twice)
   })
 
+  // Measured: `numeric: true` makes '01' and '1' compare EQUAL, so a folder
+  // holding both `1-intro.md` and `01-intro.md` ties the collator. Without the
+  // explicit tiebreak the result falls through to whatever order the caller
+  // happened to pass them in, i.e. filesystem enumeration order.
+  it('is a total order even when the collator ties', () => {
+    expect(partOrder(['01-a.md', '1-a.md'])).toEqual(['01-a.md', '1-a.md'])
+    expect(partOrder(['1-a.md', '01-a.md'])).toEqual(['01-a.md', '1-a.md'])
+  })
+
   it('does not mutate its input', () => {
     const input = ['b.md', 'a.md']
     partOrder(input)
