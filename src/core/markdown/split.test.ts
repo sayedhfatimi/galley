@@ -30,6 +30,22 @@ describe('splitFrontmatter', () => {
     expect(splitFrontmatter('---\n\nBody.\n').frontmatter).toBeNull()
   })
 
+  it('does not let a --- inside a block scalar close the block', () => {
+    // The case a regex gets wrong. Everything after the inner --- would be
+    // shown as body text and serialised away on the next keystroke.
+    const source = '---\nabstract: |\n  one\n  ---\n  two\ntitle: Kept\n---\n\nBody.\n'
+    const { frontmatter, body } = splitFrontmatter(source)
+    expect(frontmatter).toContain('title: Kept')
+    expect(body).toBe('Body.\n')
+  })
+
+  it('strips the separator after a CRLF block without leaving a stray newline', () => {
+    expect(splitFrontmatter('---\r\ntitle: T\r\n---\r\n\r\n# H\r\n')).toEqual({
+      frontmatter: 'title: T',
+      body: '# H\r\n',
+    })
+  })
+
   it('tolerates an empty block', () => {
     expect(splitFrontmatter('---\n---\n\nBody.\n')).toEqual({
       frontmatter: '',

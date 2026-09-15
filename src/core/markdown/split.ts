@@ -11,12 +11,8 @@
  * its frontmatter.
  */
 
-/**
- * A frontmatter block only exists at the very start, and only when the opening
- * fence has a closing one. A document that opens with a thematic break has no
- * closing fence, so it is left alone rather than having half of it swallowed.
- */
-const BLOCK = /^---[ \t]*\r?\n([\s\S]*?)\r?\n?---[ \t]*(?:\r?\n|$)/
+import type { Root } from 'mdast'
+import { parseMarkdown } from './parse'
 
 export interface SplitSource {
   /** The text between the fences, without them. Null when there is no block. */
@@ -24,13 +20,40 @@ export interface SplitSource {
   body: string
 }
 
+/**
+ * Where the frontmatter ends is decided by the SAME parser that converts the
+ * document, never by a second pattern of our own.
+ *
+ * A regex here looks obviously correct and is not. `remark-frontmatter` knows
+ * that a `---` line inside a YAML block scalar does not close the block; a
+ * regex does not, and truncates:
+ *
+ *     abstract: |
+ *       one
+ *       ---          <- a regex closes the block here
+ *       two
+ *     title: Kept    <- and the editor then shows this as BODY TEXT,
+ *                       which the next keystroke serialises away
+ *
+ * Deriving the boundary from the parsed tree cannot disagree with the
+ * converter, because it IS the converter's own parse.
+ */
 export function splitFrontmatter(source: string): SplitSource {
-  const match = BLOCK.exec(source)
-  if (!match) return { frontmatter: null, body: source }
-  return {
-    frontmatter: match[1] ?? '',
-    body: source.slice(match[0].length).replace(/^\r?\n/, ''),
-  }
+  return splitFromTree(source, parseMarkdown(source))
+}
+
+/** For callers that have already parsed, so a document is not parsed twice. */
+export function splitFromTree(source: string, tree: Root): SplitSource {
+  const head = tree.children[0]
+  if (head?.type !== 'yaml') return { frontmatter: null, body: source }
+
+  const end = head.position?.end?.offset
+  if (end === undefined) return { frontmatter: null, body: source }
+
+  // The blank line after the closing fence is separator, not content, and
+  // `joinFrontmatter` puts it back. `(?:\r?\n)+` rather than `\r?\n+` so a CRLF
+  // document does not keep a stray `\r\n`.
+  return { frontmatter: head.value, body: source.slice(end).replace(/^(?:\r?\n)+/, '') }
 }
 
 export function joinFrontmatter(frontmatter: string | null, body: string): string {
