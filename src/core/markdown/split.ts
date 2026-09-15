@@ -42,7 +42,15 @@ export function splitFrontmatter(source: string): SplitSource {
   return splitFromTree(source, parseMarkdown(source))
 }
 
-/** For callers that have already parsed, so a document is not parsed twice. */
+/**
+ * For callers that have already parsed, so a document is not parsed twice.
+ *
+ * `tree` must be `parseMarkdown(source)` — the SAME parse of the SAME string —
+ * because `position.end.offset` is an index into that exact string. Hand it a
+ * tree parsed from a different source (a stale tree, a differently-normalised
+ * copy) and the offset still looks valid, so the split still succeeds; it
+ * just slices the wrong string, silently.
+ */
 export function splitFromTree(source: string, tree: Root): SplitSource {
   const head = tree.children[0]
   if (head?.type !== 'yaml') return { frontmatter: null, body: source }
@@ -54,6 +62,19 @@ export function splitFromTree(source: string, tree: Root): SplitSource {
   // `joinFrontmatter` puts it back. `(?:\r?\n)+` rather than `\r?\n+` so a CRLF
   // document does not keep a stray `\r\n`.
   return { frontmatter: head.value, body: source.slice(end).replace(/^(?:\r?\n)+/, '') }
+}
+
+/**
+ * The parsed tree, minus a leading frontmatter block, for a caller that wants
+ * the editor's ProseMirror document without re-parsing the body string it
+ * already extracted. There is no `yaml` node type in the rich editor, so this
+ * is what `splitFromTree` hands the tree side of, the way `.body` is the
+ * string side.
+ */
+export function bodyTree(tree: Root): Root {
+  const head = tree.children[0]
+  if (head?.type !== 'yaml') return tree
+  return { ...tree, children: tree.children.slice(1) }
 }
 
 export function joinFrontmatter(frontmatter: string | null, body: string): string {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseMarkdown } from './parse'
 import { mdastToPm } from './pm/mdast-to-pm'
 import { serializeToMarkdown } from './pm/serialize'
-import { joinFrontmatter, splitFrontmatter } from './split'
+import { bodyTree, joinFrontmatter, splitFrontmatter } from './split'
 
 describe('splitFrontmatter', () => {
   it('separates a frontmatter block from the body', () => {
@@ -51,6 +51,19 @@ describe('splitFrontmatter', () => {
       frontmatter: '',
       body: 'Body.\n',
     })
+  })
+})
+
+describe('bodyTree', () => {
+  it('removes the leading yaml node when there is frontmatter', () => {
+    const tree = parseMarkdown('---\ntitle: T\n---\n\n# H\n\nBody.\n')
+    expect(tree.children.some((n) => n.type === 'yaml')).toBe(true)
+    expect(bodyTree(tree).children.some((n) => n.type === 'yaml')).toBe(false)
+  })
+
+  it('leaves the children unchanged when there is no frontmatter', () => {
+    const tree = parseMarkdown('# H\n\nBody.\n')
+    expect(bodyTree(tree).children).toEqual(tree.children)
   })
 })
 

@@ -14,7 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { parseMarkdown } from '@/core/markdown/parse'
 import { mdastToPm } from '@/core/markdown/pm/mdast-to-pm'
 import { serializeToMarkdown } from '@/core/markdown/pm/serialize'
-import { joinFrontmatter, splitFrontmatter } from '@/core/markdown/split'
+import { bodyTree, joinFrontmatter, splitFromTree } from '@/core/markdown/split'
 import { cn } from '@/lib/utils'
 import { pruneImages } from '@/ui/lib/imageStore'
 import { attachImage, imageFilesFrom } from './attachImage'
@@ -95,10 +95,22 @@ export function MarkdownEditor({
   const emitting = useRef(false)
   const timer = useRef<number | null>(null)
 
+  // The document is parsed once per `value`, not once per consumer: the
+  // frontmatter ref, the editor's initial content and the re-hydrate effect
+  // below all read from this rather than each calling `parseMarkdown` (via
+  // `splitFrontmatter`) on their own. Documents are accepted up to
+  // `MAX_INPUT_BYTES`, and a re-render that touches none of `value` — toggling
+  // `mode`, opening the TOC — must not re-run the parser.
+  const parsed = useMemo(() => {
+    const tree = parseMarkdown(value)
+    const { frontmatter, body } = splitFromTree(value, tree)
+    return { frontmatter, body, bodyTree: bodyTree(tree) }
+  }, [value])
+
   // The block the editor is not being shown. Seeded from the initial value so
   // the very first mount is consistent with every later re-hydrate; kept
   // current by the re-hydrate effect below.
-  const frontmatter = useRef<string | null>(splitFrontmatter(value).frontmatter)
+  const frontmatter = useRef<string | null>(parsed.frontmatter)
 
   // Built once: changing the extension list would rebuild the whole editor and
   // discard the document with it.
@@ -120,7 +132,7 @@ export function MarkdownEditor({
     extensions,
     // The frontmatter is held aside rather than handed to the editor; see the
     // re-hydrate effect below.
-    content: mdastToPm(parseMarkdown(splitFrontmatter(value).body)),
+    content: mdastToPm(parsed.bodyTree),
     editorProps: {
       attributes: {
         class:
@@ -161,14 +173,13 @@ export function MarkdownEditor({
   // node type for it, so anything given to the editor comes back without it.
   useEffect(() => {
     if (!editor || emitting.current) return
-    const incoming = splitFrontmatter(value)
-    frontmatter.current = incoming.frontmatter
+    frontmatter.current = parsed.frontmatter
     const current = serializeToMarkdown(editor.getJSON() as never)
-    if (current.trim() === incoming.body.trim()) return
-    editor.commands.setContent(mdastToPm(parseMarkdown(incoming.body)) as never, {
+    if (current.trim() === parsed.body.trim()) return
+    editor.commands.setContent(mdastToPm(parsed.bodyTree) as never, {
       emitUpdate: false,
     })
-  }, [editor, value])
+  }, [editor, parsed])
 
   useEffect(() => {
     return () => {
