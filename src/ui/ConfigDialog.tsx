@@ -23,6 +23,8 @@ export function ConfigDialog() {
   const config = useStore((s) => s.config)
   const setConfig = useStore((s) => s.setConfig)
   const prefilled = useStore((s) => s.prefilled)
+  const source = useStore((s) => s.source)
+  const setSource = useStore((s) => s.setSource)
 
   return (
     <Dialog>
@@ -45,7 +47,13 @@ export function ConfigDialog() {
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <ConfigPanel config={config} onChange={setConfig} prefilled={prefilled} />
+          <ConfigPanel
+            config={config}
+            onChange={setConfig}
+            prefilled={prefilled}
+            source={source}
+            onSourceChange={setSource}
+          />
         </div>
       </DialogContent>
     </Dialog>

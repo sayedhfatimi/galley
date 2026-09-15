@@ -16,6 +16,8 @@
  */
 
 import type { Heading, Nodes } from 'mdast'
+import { Document, parseDocument } from 'yaml'
+import { splitFrontmatter } from './markdown/split'
 
 export type PartRole = 'front' | 'main' | 'back'
 
@@ -113,4 +115,42 @@ export function readStructure(
  */
 export function roleRank(role: PartRole): number {
   return ROLES.indexOf(role)
+}
+
+/**
+ * Write a structure block back into a document's own frontmatter.
+ *
+ * The boundary comes from `splitFrontmatter`, which derives it from the real
+ * parse — NOT from a fence pattern of this module's own. A second pattern is
+ * how the editor and the converter come to disagree about where a document
+ * starts, and a `---` line inside a YAML block scalar is enough to cause it.
+ *
+ * Uses `parseDocument` rather than `parse`, so a reader's comments, key order
+ * and quoting style survive being written through. Only fields that differ from
+ * the role default are emitted, because a block full of redundant `numbered:
+ * true` lines is one nobody will read.
+ */
+export function writeStructure(source: string, structure: Map<string, PartSpec>): string {
+  const { frontmatter, body } = splitFrontmatter(source)
+  if (frontmatter === null && structure.size === 0) return source
+
+  const block: Record<string, Record<string, unknown>> = {}
+  for (const [heading, part] of structure) {
+    const entry: Record<string, unknown> = { role: part.role }
+    if (part.numbered !== (part.role === 'main')) entry.numbered = part.numbered
+    if (!part.listed) entry.listed = false
+    if (part.tocTitle) entry.toc_title = part.tocTitle
+    block[heading] = entry
+  }
+
+  const doc = frontmatter === null ? new Document({}) : parseDocument(frontmatter)
+  if (structure.size === 0) doc.delete('structure')
+  else doc.set('structure', block)
+
+  const yaml = doc.toString().trimEnd()
+
+  // An emptied block can leave nothing behind; a bare fence pair is noise.
+  // `parseDocument('').toString()` is '{}', so both forms have to be caught.
+  if (yaml === '' || yaml === '{}') return body
+  return `---\n${yaml}\n---\n\n${body}`
 }

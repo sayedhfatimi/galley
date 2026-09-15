@@ -2,7 +2,14 @@ import type { Heading, Root } from 'mdast'
 import { describe, expect, it } from 'vitest'
 import { frontmatterData } from './markdown/frontmatter'
 import { parseMarkdown } from './markdown/parse'
-import { DEFAULT_PART, headingText, readStructure, roleRank } from './structure'
+import {
+  DEFAULT_PART,
+  headingText,
+  type PartSpec,
+  readStructure,
+  roleRank,
+  writeStructure,
+} from './structure'
 
 const structureOf = (source: string) =>
   readStructure(frontmatterData(parseMarkdown(source)))
@@ -95,5 +102,85 @@ describe('roleRank', () => {
   it('orders the matter divisions as a book prints them', () => {
     expect(roleRank('front')).toBeLessThan(roleRank('main'))
     expect(roleRank('main')).toBeLessThan(roleRank('back'))
+  })
+})
+
+describe('writeStructure', () => {
+  const map = (entries: [string, PartSpec][]) => new Map(entries)
+
+  it('adds a structure block to a document that has frontmatter', () => {
+    const out = writeStructure(
+      '---\ntitle: T\n---\n\n# Copyright\n',
+      map([['Copyright', { role: 'front', numbered: false, listed: false }]]),
+    )
+    expect(out).toContain('title: T')
+    expect(out).toContain('structure:')
+    expect(out).toContain('Copyright:')
+    expect(out).toContain('listed: false')
+    expect(out).toContain('# Copyright')
+  })
+
+  it('creates frontmatter when the document has none', () => {
+    const out = writeStructure(
+      '# Copyright\n',
+      map([['Copyright', { role: 'front', numbered: false, listed: true }]]),
+    )
+    expect(out.startsWith('---\n')).toBe(true)
+    expect(out).toContain('role: front')
+    expect(out).toContain('# Copyright')
+  })
+
+  it('omits flags that match the role default, so the block stays readable', () => {
+    const out = writeStructure(
+      '# D\n',
+      map([['D', { role: 'front', numbered: false, listed: true }]]),
+    )
+    expect(out).toContain('role: front')
+    expect(out).not.toContain('numbered:')
+    expect(out).not.toContain('listed:')
+  })
+
+  it('writes a short title only when there is one', () => {
+    const withTitle = writeStructure(
+      '# I\n',
+      map([['I', { role: 'front', numbered: false, listed: true, tocTitle: 'Intro' }]]),
+    )
+    expect(withTitle).toContain('toc_title: Intro')
+  })
+
+  it('removes the block when nothing is left to say', () => {
+    const source = '---\ntitle: T\nstructure:\n  A: { role: front }\n---\n\n# A\n'
+    const out = writeStructure(source, map([]))
+    expect(out).not.toContain('structure:')
+    expect(out).toContain('title: T')
+  })
+
+  it('leaves a document with no frontmatter alone when there is nothing to write', () => {
+    expect(writeStructure('# A\n', map([]))).toBe('# A\n')
+  })
+
+  it('round-trips through readStructure', () => {
+    const original = map([
+      ['Copyright', { role: 'front', numbered: false, listed: false } as PartSpec],
+      ['Ch One', { role: 'main', numbered: true, listed: true } as PartSpec],
+      [
+        'After',
+        { role: 'back', numbered: false, listed: true, tocTitle: 'A' } as PartSpec,
+      ],
+    ])
+    const source = writeStructure('# x\n', original)
+    const back = readStructure(frontmatterData(parseMarkdown(source)))
+    expect(back).toEqual(original)
+  })
+
+  it('does not truncate frontmatter at a --- inside a block scalar', () => {
+    const source = '---\nabstract: |\n  one\n  ---\n  two\ntitle: Kept\n---\n\n# A\n'
+    const out = writeStructure(
+      source,
+      map([['A', { role: 'front', numbered: false, listed: true }]]),
+    )
+    expect(out).toContain('title: Kept')
+    expect(out).toContain('abstract:')
+    expect(out).toContain('# A')
   })
 })

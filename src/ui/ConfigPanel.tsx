@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -26,6 +26,16 @@ import {
 } from '@/core/config'
 import { previewFamily, TYPEFACE_NAMES, TYPEFACES, type TypefaceName } from '@/core/fonts'
 import { GUTTER_BANDS, kdpMargins } from '@/core/kdp'
+import { frontmatterData } from '@/core/markdown/frontmatter'
+import { parseMarkdown } from '@/core/markdown/parse'
+import {
+  DEFAULT_PART,
+  headingText,
+  type PartRole,
+  type PartSpec,
+  readStructure,
+  writeStructure,
+} from '@/core/structure'
 
 /**
  * A small panel with defaults good enough to ignore entirely.
@@ -40,6 +50,9 @@ export interface ConfigPanelProps {
   onChange: (config: GalleyConfig) => void
   /** True when the metadata below came from the document's own frontmatter. */
   prefilled: boolean
+  /** The document itself: the Structure section reads and writes its frontmatter. */
+  source: string
+  onSourceChange: (source: string) => void
 }
 
 const CHARACTERS: { value: DocumentCharacter; label: string; hint: string }[] = [
@@ -164,7 +177,7 @@ function ToggleRow({
 }: {
   id: string
   label: string
-  hint: string
+  hint?: string
   checked: boolean
   disabled?: boolean
   onChange: (value: boolean) => void
@@ -173,14 +186,128 @@ function ToggleRow({
     <div className="flex items-center justify-between gap-3 text-sm">
       <Label htmlFor={id} className="grid gap-0.5 font-normal">
         <span>{label}</span>
-        <span className="text-muted-foreground text-xs">{hint}</span>
+        {hint ? <span className="text-muted-foreground text-xs">{hint}</span> : null}
       </Label>
       <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onChange} />
     </div>
   )
 }
 
-export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
+/**
+ * Which part of the book each top-level heading is.
+ *
+ * Built from the document's own headings rather than from a list the reader
+ * maintains, so the two cannot disagree. Every edit is written straight back
+ * into the document's frontmatter: structure belongs to the manuscript, not to
+ * this browser, and a manuscript sent to someone else must carry it.
+ */
+function StructureSection({
+  source,
+  onSourceChange,
+}: {
+  source: string
+  onSourceChange: (source: string) => void
+}) {
+  const { headings, structure } = useMemo(() => {
+    const tree = parseMarkdown(source)
+    const titles: string[] = []
+    for (const node of tree.children) {
+      if (node.type !== 'heading' || node.depth !== 1) continue
+      const text = headingText(node)
+      if (text && !titles.includes(text)) titles.push(text)
+    }
+    return { headings: titles, structure: readStructure(frontmatterData(tree)) }
+  }, [source])
+
+  if (headings.length === 0) {
+    return (
+      <p className="text-muted-foreground text-xs">
+        Top-level headings appear here once the document has some. In a book each one is a
+        chapter.
+      </p>
+    )
+  }
+
+  const update = (heading: string, patch: Partial<PartSpec>) => {
+    const next = new Map(structure)
+    const current = next.get(heading) ?? DEFAULT_PART
+    const merged: PartSpec = { ...current, ...patch }
+
+    // Changing the role re-applies that role's numbering unless numbering was
+    // the thing being changed. Otherwise moving a chapter into front matter
+    // would leave it numbered, which is never what the move means.
+    if (patch.role !== undefined && patch.numbered === undefined) {
+      merged.numbered = patch.role === 'main'
+    }
+    if (!merged.tocTitle) delete merged.tocTitle
+
+    const isDefault =
+      merged.role === 'main' && merged.numbered && merged.listed && !merged.tocTitle
+    if (isDefault) next.delete(heading)
+    else next.set(heading, merged)
+
+    onSourceChange(writeStructure(source, next))
+  }
+
+  return (
+    <div className="grid gap-3">
+      {headings.map((heading) => {
+        const part = structure.get(heading) ?? DEFAULT_PART
+        return (
+          <div key={heading} className="grid gap-2 rounded-md border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="truncate font-medium text-sm" title={heading}>
+                {heading}
+              </span>
+              <Select
+                value={part.role}
+                onValueChange={(v) => update(heading, { role: v as PartRole })}
+              >
+                <SelectTrigger className="w-36 shrink-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="front">Front matter</SelectItem>
+                  <SelectItem value="main">Main matter</SelectItem>
+                  <SelectItem value="back">Back matter</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-wrap items-center gap-4">
+              <ToggleRow
+                id={`numbered-${heading}`}
+                label="Numbered"
+                checked={part.numbered}
+                onChange={(v) => update(heading, { numbered: v })}
+              />
+              <ToggleRow
+                id={`listed-${heading}`}
+                label="In the contents"
+                checked={part.listed}
+                onChange={(v) => update(heading, { listed: v })}
+              />
+            </div>
+            <Field label="Contents entry, if it should be shorter">
+              <Input
+                value={part.tocTitle ?? ''}
+                placeholder={heading}
+                onChange={(e) => update(heading, { tocTitle: e.target.value })}
+              />
+            </Field>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export function ConfigPanel({
+  config,
+  onChange,
+  prefilled,
+  source,
+  onSourceChange,
+}: ConfigPanelProps) {
   const set = <K extends keyof GalleyConfig>(key: K, value: GalleyConfig[K]) =>
     onChange({ ...config, [key]: value })
 
@@ -429,6 +556,12 @@ export function ConfigPanel({ config, onChange, prefilled }: ConfigPanelProps) {
 
       <div className="grid min-w-0 content-start gap-3">
         <KdpPreset config={config} onChange={onChange} />
+
+        <Separator />
+
+        <Field label="Structure">
+          <StructureSection source={source} onSourceChange={onSourceChange} />
+        </Field>
 
         <Separator />
 
