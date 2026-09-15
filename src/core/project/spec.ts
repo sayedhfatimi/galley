@@ -12,7 +12,14 @@
  * `{ role: front }` means.
  */
 
-import { type PartSpec, resolvePart } from '../structure'
+import { splitFrontmatter } from '../markdown/split'
+import {
+  type PartSpec,
+  parseWritableFrontmatter,
+  partSpecFields,
+  resolvePart,
+  writeFrontmatterKey,
+} from '../structure'
 
 /** The key whose presence puts a file in the book. */
 const KEY = 'galley'
@@ -40,4 +47,25 @@ export function readPartSpec(data: Record<string, unknown> | null): PartSpecResu
     spec: resolvePart(usable ? (value as Record<string, unknown>) : {}),
     malformed: !usable,
   }
+}
+
+/**
+ * Whether `writePartSpec` will actually rewrite this file's frontmatter.
+ *
+ * Delegates to the same guard the writer uses rather than deciding a second
+ * time — the UI needs to explain a no-op before the author hits it, and a
+ * second predicate is exactly what drifted in v2.1.0.
+ */
+export function canWritePartSpec(source: string): boolean {
+  return parseWritableFrontmatter(splitFrontmatter(source).frontmatter) !== null
+}
+
+/**
+ * Put a file in the book, or with `null` take it out — making it a note.
+ *
+ * All the care lives in `writeFrontmatterKey` and `partSpecFields`; this is
+ * only the statement that a part's settings are written under `galley:`.
+ */
+export function writePartSpec(source: string, spec: PartSpec | null): string {
+  return writeFrontmatterKey(source, KEY, spec === null ? null : partSpecFields(spec))
 }
