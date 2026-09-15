@@ -16,7 +16,21 @@ describe('partOrder', () => {
     ).toEqual(['01-copyright.md', '02-dedication.md', '03-illusion/index.md'])
   })
 
-  it('is deterministic for a file and a folder sharing a stem', () => {
+  // Measured: the case above does NOT discriminate — a comparator that sorted
+  // on the basename alone produces the identical answer for it. This pair does:
+  // every basename here is `index.md`, so only the directory can order them.
+  it('orders per-chapter folders by their directory, not their filename', () => {
+    expect(partOrder(['10-b/index.md', '2-a/index.md'])).toEqual([
+      '2-a/index.md',
+      '10-b/index.md',
+    ])
+  })
+
+  // Named for what it actually pins. These two do NOT tie the collator
+  // (`compare('03-x/index.md', '03-x.md')` is 1, not 0) — the real tie case is
+  // below. What this catches is a comparator that always returns 0, which sort
+  // stability would otherwise hide.
+  it('gives the same answer whichever order the paths arrive in', () => {
     const once = partOrder(['03-x/index.md', '03-x.md'])
     const twice = partOrder(['03-x.md', '03-x/index.md'])
     expect(once).toEqual(twice)
