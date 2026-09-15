@@ -22,7 +22,7 @@ export type DiagnosticKind =
   | 'structure-unmatched'
   /** Parts appear out of matter order; they are emitted where they were written. */
   | 'structure-order'
-  /** Front and back matter were asked for in a document class that has neither. */
+  /** Front and back matter were asked for in an Article or Report, which have neither. */
   | 'structure-ignored'
 
 export interface Diagnostic {
