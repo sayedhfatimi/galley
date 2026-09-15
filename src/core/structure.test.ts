@@ -410,11 +410,30 @@ describe('writeFrontmatterKey', () => {
   // The v2.1.0 bug this exists once to prevent: deleting the last real key
   // from a comment-only frontmatter left an empty map, whose literal `{}`
   // shipped in the writer's manuscript alongside their comment.
-  it('strips the empty-document token but keeps a comment', () => {
-    const out = writeFrontmatterKey('---\n# note\nx: 1\n---\n\n# C\n', 'x', null)
+  // The v2.1.0 bug this exists once to prevent: a frontmatter that is only a
+  // comment parses to `contents === null`, and `yaml` stringifies that as a
+  // literal `{}` or `null` — which shipped in the writer's manuscript
+  // alongside their comment.
+  it('strips the empty-document token but keeps a document-level comment', () => {
+    const out = writeFrontmatterKey('---\n# note\n---\n\n# C\n', 'absent', null)
     expect(out).toContain('# note')
     expect(out).not.toContain('{}')
     expect(out).not.toContain('null')
+  })
+
+  // Verified against yaml@2.9: a comment binds to the node that FOLLOWS it, so
+  // `# note` here belongs to `x`. It therefore goes when `x` goes. Rescuing it
+  // onto the document would move the writer's own words above an unrelated key,
+  // where they describe something they were never written about — and this
+  // routine is shared with `writeStructure`, whose shipped behaviour is this.
+  it('lets a comment go with the key it was written above', () => {
+    const out = writeFrontmatterKey(
+      '---\ntitle: T\n# note\nx: 1\n---\n\n# C\n',
+      'x',
+      null,
+    )
+    expect(out).toContain('title: T')
+    expect(out).not.toContain('# note')
   })
 
   it('drops the fence entirely when nothing is left', () => {

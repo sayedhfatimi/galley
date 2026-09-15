@@ -16,7 +16,7 @@
  */
 
 import type { Heading, Nodes } from 'mdast'
-import { Document, isMap, isScalar, parseDocument } from 'yaml'
+import { Document, isMap, parseDocument } from 'yaml'
 import { joinFrontmatter, splitFrontmatter } from './markdown/split'
 
 export type PartRole = 'front' | 'main' | 'back'
@@ -213,12 +213,15 @@ export function parseWritableFrontmatter(frontmatter: string | null) {
  * literal `{}` — which went out in a writer's manuscript alongside their
  * comment. Three copies of this would be three chances to get it wrong again.
  *
- * A second, related subtlety: `yaml` attaches a comment written directly
- * above a key to that key's OWN node, not to the document. Deleting that key
- * therefore deletes its comment too, unless it is rescued first — so a
- * comment sitting right above the key being removed is moved onto the
- * document itself before the delete, and survives even once the map it was
- * written in is gone.
+ * A second, related subtlety, deliberately left as-is: `yaml` attaches a
+ * comment written directly above a key to that key's OWN node, not to the
+ * document, so deleting that key deletes its comment too. An orphaned
+ * comment is allowed to go with the key it was written above rather than
+ * being rescued onto the document — rescuing it would relocate the writer's
+ * own words above whatever key happens to follow, where they describe
+ * something they were never written about. This is shared with
+ * `writeStructure`, so that is also its shipped behaviour. Do not
+ * reintroduce a rescue.
  */
 export function writeFrontmatterKey(
   source: string,
@@ -232,21 +235,8 @@ export function writeFrontmatterKey(
   if (doc === null) return source
 
   try {
-    if (value === null) {
-      const orphaned =
-        isMap(doc.contents) &&
-        doc.contents.items.find((item) => isScalar(item.key) && item.key.value === key)
-          ?.key
-      const comment = orphaned && isScalar(orphaned) ? orphaned.commentBefore : undefined
-      doc.delete(key)
-      if (comment) {
-        doc.commentBefore = doc.commentBefore
-          ? `${doc.commentBefore}\n${comment}`
-          : comment
-      }
-    } else {
-      doc.set(key, value)
-    }
+    if (value === null) doc.delete(key)
+    else doc.set(key, value)
 
     // Judged by `doc.contents` itself — null before any key exists, or an
     // emptied map once the last is removed — NOT by string-comparing the
