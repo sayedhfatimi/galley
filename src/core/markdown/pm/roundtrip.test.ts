@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest'
 import { presetFor } from '../../config'
 import { serializeToLatex } from '../../latex/serialize'
 import { parseMarkdown } from '../parse'
+import { bodyTree } from '../split'
 import { mdastToPm } from './mdast-to-pm'
 import { pmToMdast } from './pm-to-mdast'
+import { serializeToMarkdown } from './serialize'
 
 /**
  * The guard for the TipTap editor.
@@ -81,4 +83,29 @@ describe('ProseMirror round trip preserves galley constructs', () => {
     )
     expectLossless(fixture)
   })
+})
+
+/**
+ * Regression guard for `MarkdownEditor.tsx`'s re-hydrate effect (Important 1
+ * of the Structure-section re-review).
+ *
+ * The editor must not run `setContent` on its own edits — that would throw
+ * the writer's caret to the start of the document on every keystroke — so a
+ * re-hydrate effect skips it when the incoming body already matches what the
+ * editor was last synchronised to. An earlier version of that guard compared
+ * the incoming body against the editor's CURRENT content, RE-SERIALISED,
+ * rather than against a ref recording the last body it was actually set
+ * to. That only equals the incoming source when the source is already
+ * written in the serialiser's own canonical spelling — ATX headings, `*`
+ * emphasis, `-` bullets — which a hand-written or Obsidian-exported
+ * manuscript routinely is not. This test proves the re-serialised form does
+ * NOT converge to the source for exactly that kind of input, which is why
+ * that guard could never work and a synchronised-body ref is required
+ * instead.
+ */
+it('does not re-serialise non-canonical Markdown back to its own source', () => {
+  const source =
+    'Chapter One\n===========\n\nSome text with _emphasis_ and a list:\n\n* one\n* two\n'
+  const reserialized = serializeToMarkdown(mdastToPm(bodyTree(parseMarkdown(source))))
+  expect(reserialized).not.toBe(source)
 })

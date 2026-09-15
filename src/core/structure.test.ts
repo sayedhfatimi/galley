@@ -173,6 +173,23 @@ describe('writeStructure', () => {
     expect(back).toEqual(original)
   })
 
+  // Minor 4: every other tocTitle case in this file is a single word, which
+  // is exactly the shape that survived even the buggy per-keystroke UI
+  // binding — a space is what exposed it. Round-tripping a multi-word
+  // heading AND a multi-word tocTitle here is what actually proves the pure
+  // core preserves whitespace, independent of anything the UI does with it.
+  it('round-trips a multi-word heading and a multi-word toc_title', () => {
+    const original = map([
+      [
+        'A Rather Long Chapter Title',
+        { role: 'main', numbered: true, listed: true, tocTitle: 'A Note' } as PartSpec,
+      ],
+    ])
+    const source = writeStructure('# x\n', original)
+    const back = readStructure(frontmatterData(parseMarkdown(source)))
+    expect(back).toEqual(original)
+  })
+
   it('does not truncate frontmatter at a --- inside a block scalar', () => {
     const source = '---\nabstract: |\n  one\n  ---\n  two\ntitle: Kept\n---\n\n# A\n'
     const out = writeStructure(

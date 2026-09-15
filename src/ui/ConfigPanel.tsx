@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -26,7 +26,7 @@ import {
 } from '@/core/config'
 import { previewFamily, TYPEFACE_NAMES, TYPEFACES, type TypefaceName } from '@/core/fonts'
 import { GUTTER_BANDS, kdpMargins } from '@/core/kdp'
-import { frontmatterData } from '@/core/markdown/frontmatter'
+import { frontmatterData, hasFrontmatter } from '@/core/markdown/frontmatter'
 import { parseMarkdown } from '@/core/markdown/parse'
 import {
   DEFAULT_PART,
@@ -201,23 +201,41 @@ function ToggleRow({
  * into the document's frontmatter: structure belongs to the manuscript, not to
  * this browser, and a manuscript sent to someone else must carry it.
  */
-function StructureSection({
+export function StructureSection({
   source,
   onSourceChange,
 }: {
   source: string
   onSourceChange: (source: string) => void
 }) {
-  const { headings, structure } = useMemo(() => {
+  const { headings, structure, unreadable } = useMemo(() => {
     const tree = parseMarkdown(source)
+    // Exactly the set of documents `writeStructure` refuses to touch (see its
+    // own docstring): frontmatter is present but `frontmatterData` could not
+    // parse it as a mapping — duplicate keys, tab indentation, an unclosed
+    // flow collection. `readStructure(null)` silently yields an empty map, so
+    // without this every heading would render at its default with nothing
+    // to explain why a change does not stick — the "control that stops
+    // working without saying so" class `structure.ts` names as a repeat bug.
+    const data = frontmatterData(tree)
+    const unreadable = hasFrontmatter(tree) && data === null
     const titles: string[] = []
     for (const node of tree.children) {
       if (node.type !== 'heading' || node.depth !== 1) continue
       const text = headingText(node)
       if (text && !titles.includes(text)) titles.push(text)
     }
-    return { headings: titles, structure: readStructure(frontmatterData(tree)) }
+    return { headings: titles, structure: readStructure(data), unreadable }
   }, [source])
+
+  if (unreadable) {
+    return (
+      <p className="text-muted-foreground text-xs">
+        galley cannot read this document's frontmatter, so structure cannot be saved here.
+        Open source view to fix the block by hand, then come back to Structure.
+      </p>
+    )
+  }
 
   if (headings.length === 0) {
     return (
@@ -329,6 +347,22 @@ function StructureSection({
  * -> full LaTeX conversion -> editor reparse chain (Important 4): a role or
  * toggle change is still an immediate write (those are single discrete
  * actions, not typing), but text entry is now one write per field visit.
+ *
+ * Blur and Enter are not the only way this field loses focus. Dismissing the
+ * Configure dialog with Escape never fires one: Radix's `DismissableLayer`
+ * flips `open`, and `FocusScope` restores focus from a `setTimeout` scheduled
+ * during effect cleanup — by which point this input is already detached from
+ * the document, so no `focusout` can reach React's root. React synthesises no
+ * blur at unmount either. So an unmount-time commit is a separate path, not a
+ * consequence of the blur handler above; it is added as its own `useEffect`
+ * cleanup below, reading through a ref rather than the `commit` closure
+ * because a `[]`-deps effect's cleanup is the one captured at mount, and only
+ * a ref stays current with later keystrokes without re-subscribing the effect
+ * on every render (which would itself fire the cleanup — and therefore a
+ * commit — on every keystroke). The `draft !== storedValue` guard, unchanged,
+ * is what stops StrictMode's development-only mount -> unmount -> mount cycle
+ * from producing a spurious write: on that first synthetic unmount `draft`
+ * still equals `storedValue`, so there is nothing to commit.
  */
 export function TocTitleInput({
   storedValue,
@@ -351,9 +385,29 @@ export function TocTitleInput({
     setDraft(storedValue)
   }
 
+  // Always current, read only from places that cannot rely on a fresh render
+  // closure: the unmount cleanup below fires from whatever closure was
+  // captured on mount, so it has to reach the latest values through this
+  // instead.
+  const latest = useRef({ draft, storedValue, onCommit })
+  latest.current = { draft, storedValue, onCommit }
+
   const commit = () => {
-    if (draft !== storedValue) onCommit(draft)
+    // A trailing space is deliberate mid-sentence but not in a contents
+    // entry — untrimmed, `writeStructure` quotes it into the frontmatter,
+    // `resolvePart` trims it straight back out on read, `storedValue` never
+    // changes to match, and the field is left permanently showing whitespace
+    // the manuscript does not actually carry. Trimming here, at the one
+    // place text leaves this field, keeps the two in step.
+    if (draft !== storedValue) onCommit(draft.trim())
   }
+
+  useEffect(() => {
+    return () => {
+      const current = latest.current
+      if (current.draft !== current.storedValue) current.onCommit(current.draft.trim())
+    }
+  }, [])
 
   return (
     <Input
