@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { parseMarkdown } from '@/core/markdown/parse'
 import { mdastToPm } from '@/core/markdown/pm/mdast-to-pm'
 import { serializeToMarkdown } from '@/core/markdown/pm/serialize'
+import { joinFrontmatter, splitFrontmatter } from '@/core/markdown/split'
 import { cn } from '@/lib/utils'
 import { pruneImages } from '@/ui/lib/imageStore'
 import { attachImage, imageFilesFrom } from './attachImage'
@@ -94,6 +95,11 @@ export function MarkdownEditor({
   const emitting = useRef(false)
   const timer = useRef<number | null>(null)
 
+  // The block the editor is not being shown. Seeded from the initial value so
+  // the very first mount is consistent with every later re-hydrate; kept
+  // current by the re-hydrate effect below.
+  const frontmatter = useRef<string | null>(splitFrontmatter(value).frontmatter)
+
   // Built once: changing the extension list would rebuild the whole editor and
   // discard the document with it.
   const extensions = useMemo(
@@ -112,7 +118,9 @@ export function MarkdownEditor({
 
   const editor = useEditor({
     extensions,
-    content: mdastToPm(parseMarkdown(value)),
+    // The frontmatter is held aside rather than handed to the editor; see the
+    // re-hydrate effect below.
+    content: mdastToPm(parseMarkdown(splitFrontmatter(value).body)),
     editorProps: {
       attributes: {
         class:
@@ -133,7 +141,12 @@ export function MarkdownEditor({
       if (timer.current !== null) window.clearTimeout(timer.current)
       timer.current = window.setTimeout(() => {
         emitting.current = true
-        onChange(serializeToMarkdown(editor.getJSON() as never))
+        onChange(
+          joinFrontmatter(
+            frontmatter.current,
+            serializeToMarkdown(editor.getJSON() as never),
+          ),
+        )
         window.setTimeout(() => {
           emitting.current = false
         }, 0)
@@ -143,11 +156,16 @@ export function MarkdownEditor({
 
   // Re-hydrate only when the document changed underneath us — an upload, a
   // restored session, or a paste into the source view — never on our own edits.
+  //
+  // The frontmatter is held aside rather than handed to the editor: there is no
+  // node type for it, so anything given to the editor comes back without it.
   useEffect(() => {
     if (!editor || emitting.current) return
+    const incoming = splitFrontmatter(value)
+    frontmatter.current = incoming.frontmatter
     const current = serializeToMarkdown(editor.getJSON() as never)
-    if (current.trim() === value.trim()) return
-    editor.commands.setContent(mdastToPm(parseMarkdown(value)) as never, {
+    if (current.trim() === incoming.body.trim()) return
+    editor.commands.setContent(mdastToPm(parseMarkdown(incoming.body)) as never, {
       emitUpdate: false,
     })
   }, [editor, value])
