@@ -97,3 +97,13 @@ export function readStructure(
   }
   return out
 }
+
+/**
+ * Matter divisions in print order, so a part written out of sequence can be
+ * detected. galley emits parts in DOCUMENT order regardless — silently
+ * reordering somebody's manuscript is not a formatting decision — so this
+ * exists to raise a diagnostic, not to sort.
+ */
+export function roleRank(role: PartRole): number {
+  return ROLES.indexOf(role)
+}

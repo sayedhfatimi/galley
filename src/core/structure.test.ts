@@ -2,7 +2,7 @@ import type { Heading, Root } from 'mdast'
 import { describe, expect, it } from 'vitest'
 import { frontmatterData } from './markdown/frontmatter'
 import { parseMarkdown } from './markdown/parse'
-import { DEFAULT_PART, headingText, readStructure } from './structure'
+import { DEFAULT_PART, headingText, readStructure, roleRank } from './structure'
 
 const structureOf = (source: string) =>
   readStructure(frontmatterData(parseMarkdown(source)))
@@ -88,5 +88,12 @@ describe('readStructure', () => {
   it('trims heading keys so indentation cannot break a match', () => {
     const s = structureOf('---\nstructure:\n  "  Copyright  ": { role: front }\n---\n')
     expect(s.has('Copyright')).toBe(true)
+  })
+})
+
+describe('roleRank', () => {
+  it('orders the matter divisions as a book prints them', () => {
+    expect(roleRank('front')).toBeLessThan(roleRank('main'))
+    expect(roleRank('main')).toBeLessThan(roleRank('back'))
   })
 })
