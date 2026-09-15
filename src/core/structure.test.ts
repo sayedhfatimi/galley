@@ -183,4 +183,54 @@ describe('writeStructure', () => {
     expect(out).toContain('abstract:')
     expect(out).toContain('# A')
   })
+
+  // Critical 1: `writeStructure` must be TOTAL. `parseDocument` collects
+  // errors rather than throwing, but `Document.toString()` refuses once any
+  // are present, and `set`/`delete` assert the contents are a keyable
+  // collection. None of that may reach the caller — there is no React error
+  // boundary in this app, so a throw out of a Select's `onValueChange`
+  // unmounts the whole root. Each case below must return `source` unchanged.
+  const entry: [string, PartSpec] = [
+    'A',
+    { role: 'front', numbered: false, listed: true },
+  ]
+
+  it('returns the source unchanged for malformed YAML (unclosed flow collection)', () => {
+    const source = '---\ntitle: [unclosed\n---\n\n# A\n'
+    expect(() => writeStructure(source, map([entry]))).not.toThrow()
+    expect(writeStructure(source, map([entry]))).toBe(source)
+  })
+
+  it('returns the source unchanged for duplicate keys', () => {
+    const source = '---\ntitle: A\ntitle: B\n---\n\n# A\n'
+    expect(() => writeStructure(source, map([entry]))).not.toThrow()
+    expect(writeStructure(source, map([entry]))).toBe(source)
+  })
+
+  it('returns the source unchanged for tab-indented YAML', () => {
+    const source = '---\nkey:\n\tnested: 1\n---\n\n# A\n'
+    expect(() => writeStructure(source, map([entry]))).not.toThrow()
+    expect(writeStructure(source, map([entry]))).toBe(source)
+  })
+
+  it('returns the source unchanged when the frontmatter is a sequence, not a mapping', () => {
+    const source = '---\n- one\n- two\n---\n\n# A\n'
+    expect(() => writeStructure(source, map([entry]))).not.toThrow()
+    expect(writeStructure(source, map([entry]))).toBe(source)
+  })
+
+  it('returns the source unchanged when the frontmatter is a bare scalar', () => {
+    const source = '---\njust text\n---\n\n# A\n'
+    expect(() => writeStructure(source, map([entry]))).not.toThrow()
+    expect(writeStructure(source, map([entry]))).toBe(source)
+  })
+
+  it('still writes into frontmatter that is empty but valid', () => {
+    // Regression guard for the fix above: contents === null (no keys yet) is
+    // NOT the same failure as a sequence or scalar document — `yaml` upgrades
+    // it to a map on the first `set`, so this must keep working.
+    const out = writeStructure('---\n---\n\n# A\n', map([entry]))
+    expect(out).toContain('structure:')
+    expect(out).toContain('# A')
+  })
 })

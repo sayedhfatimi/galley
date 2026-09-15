@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -233,10 +233,14 @@ function StructureSection({
     const current = next.get(heading) ?? DEFAULT_PART
     const merged: PartSpec = { ...current, ...patch }
 
-    // Changing the role re-applies that role's numbering unless numbering was
-    // the thing being changed. Otherwise moving a chapter into front matter
-    // would leave it numbered, which is never what the move means.
-    if (patch.role !== undefined && patch.numbered === undefined) {
+    // Changing the role re-applies that role's numbering default, but only
+    // when the default actually differs between the old and new role. Both
+    // front and back matter default to unnumbered, so `front -> back` must
+    // NOT clobber a deliberate `numbered: true` (numbered appendices are
+    // standard) even though `patch.numbered` is absent from this patch too.
+    const defaultChanged =
+      patch.role !== undefined && (patch.role === 'main') !== (current.role === 'main')
+    if (defaultChanged && patch.numbered === undefined) {
       merged.numbered = patch.role === 'main'
     }
     if (!merged.tocTitle) delete merged.tocTitle
@@ -251,8 +255,13 @@ function StructureSection({
 
   return (
     <div className="grid gap-3">
-      {headings.map((heading) => {
+      {headings.map((heading, index) => {
         const part = structure.get(heading) ?? DEFAULT_PART
+        // Whitespace is invalid in an HTML id; the heading text is exactly
+        // what can contain it, so an index-based id is used instead. Safe
+        // here because `headings` is deduplicated and rendered in a stable
+        // order for the lifetime of this list.
+        const fieldId = `part-${index}`
         return (
           <div key={heading} className="grid gap-2 rounded-md border p-3">
             <div className="flex items-center justify-between gap-3">
@@ -275,29 +284,89 @@ function StructureSection({
             </div>
             <div className="flex flex-wrap items-center gap-4">
               <ToggleRow
-                id={`numbered-${heading}`}
+                id={`numbered-${fieldId}`}
                 label="Numbered"
                 checked={part.numbered}
                 onChange={(v) => update(heading, { numbered: v })}
               />
               <ToggleRow
-                id={`listed-${heading}`}
+                id={`listed-${fieldId}`}
                 label="In the contents"
                 checked={part.listed}
                 onChange={(v) => update(heading, { listed: v })}
               />
             </div>
             <Field label="Contents entry, if it should be shorter">
-              <Input
-                value={part.tocTitle ?? ''}
+              <TocTitleInput
+                storedValue={part.tocTitle ?? ''}
                 placeholder={heading}
-                onChange={(e) => update(heading, { tocTitle: e.target.value })}
+                onCommit={(tocTitle) => update(heading, { tocTitle })}
               />
             </Field>
           </div>
         )
       })}
     </div>
+  )
+}
+
+/**
+ * The Contents-entry field. Writing on every keystroke does not work here:
+ * the field is fully controlled off a value re-derived from the source, and
+ * `resolvePart` trims on read, so a keystroke that produces a trailing space
+ * round-trips to a value with the space gone, the DOM node resets, and the
+ * next character lands where the space was. Typing "A Note" one keystroke at
+ * a time used to produce "ANote" in the field AND in the manuscript.
+ *
+ * The fix holds the in-progress text in local state and commits to the
+ * source only on blur or Enter, so mid-edit whitespace is never round-tripped
+ * through `writeStructure` -> `readStructure` -> `resolvePart`'s trim.
+ * `resolvePart` keeps trimming on read, which is correct for what ends up in
+ * the manuscript's frontmatter; the bug was writing on every keystroke, not
+ * the trim itself.
+ *
+ * This also happens to remove the per-keystroke `writeStructure` -> `setSource`
+ * -> full LaTeX conversion -> editor reparse chain (Important 4): a role or
+ * toggle change is still an immediate write (those are single discrete
+ * actions, not typing), but text entry is now one write per field visit.
+ */
+export function TocTitleInput({
+  storedValue,
+  placeholder,
+  onCommit,
+}: {
+  storedValue: string
+  placeholder: string
+  onCommit: (value: string) => void
+}) {
+  const [draft, setDraft] = useState(storedValue)
+  // Re-seed local state when the stored value changes for a reason other than
+  // this field's own editing — e.g. the heading's structure entry was reset
+  // elsewhere, or a different document was loaded. Comparing against the
+  // previous `storedValue` (rather than always re-seeding on render) is what
+  // stops this from clobbering the very keystroke the field exists to accept.
+  const lastStored = useRef(storedValue)
+  if (lastStored.current !== storedValue) {
+    lastStored.current = storedValue
+    setDraft(storedValue)
+  }
+
+  const commit = () => {
+    if (draft !== storedValue) onCommit(draft)
+  }
+
+  return (
+    <Input
+      value={draft}
+      placeholder={placeholder}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter') return
+        e.preventDefault()
+        commit()
+      }}
+    />
   )
 }
 

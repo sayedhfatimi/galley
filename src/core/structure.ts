@@ -16,7 +16,7 @@
  */
 
 import type { Heading, Nodes } from 'mdast'
-import { Document, parseDocument } from 'yaml'
+import { Document, isMap, parseDocument } from 'yaml'
 import { splitFrontmatter } from './markdown/split'
 
 export type PartRole = 'front' | 'main' | 'back'
@@ -129,28 +129,63 @@ export function roleRank(role: PartRole): number {
  * and quoting style survive being written through. Only fields that differ from
  * the role default are emitted, because a block full of redundant `numbered:
  * true` lines is one nobody will read.
+ *
+ * This function is TOTAL: it must never throw, because it runs from a Select's
+ * `onValueChange` and there is no React error boundary anywhere in this app —
+ * an uncaught throw here unmounts the whole root to a white page. `parseDocument`
+ * does not throw, but it *collects* errors, and `Document.toString()` refuses
+ * ("Document with errors cannot be stringified") once any are present; `set`/
+ * `delete` likewise assert the contents are a keyable collection and throw
+ * otherwise (a sequence document, a scalar document). Frontmatter this broken
+ * is left exactly as the writer had it — matching `frontmatter.ts`'s rule that
+ * malformed frontmatter is not a failure — rather than rewritten or dropped.
+ * The try/catch is a backstop, not the primary defence: the checks above are
+ * what make this correct; the catch is insurance against a `yaml` edge case
+ * neither of them anticipated.
  */
 export function writeStructure(source: string, structure: Map<string, PartSpec>): string {
   const { frontmatter, body } = splitFrontmatter(source)
   if (frontmatter === null && structure.size === 0) return source
 
-  const block: Record<string, Record<string, unknown>> = {}
-  for (const [heading, part] of structure) {
-    const entry: Record<string, unknown> = { role: part.role }
-    if (part.numbered !== (part.role === 'main')) entry.numbered = part.numbered
-    if (!part.listed) entry.listed = false
-    if (part.tocTitle) entry.toc_title = part.tocTitle
-    block[heading] = entry
+  try {
+    const block: Record<string, Record<string, unknown>> = {}
+    for (const [heading, part] of structure) {
+      const entry: Record<string, unknown> = { role: part.role }
+      if (part.numbered !== (part.role === 'main')) entry.numbered = part.numbered
+      if (!part.listed) entry.listed = false
+      if (part.tocTitle) entry.toc_title = part.tocTitle
+      block[heading] = entry
+    }
+
+    const doc = frontmatter === null ? new Document({}) : parseDocument(frontmatter)
+
+    // A document that already failed to parse cleanly (duplicate keys, tab
+    // indentation, an unclosed flow collection, …) cannot be safely rewritten:
+    // `toString()` would throw on it regardless of what we do to `structure`.
+    // Existing content the writer already had takes priority over this
+    // feature working, so it is left untouched.
+    if (doc.errors.length > 0) return source
+
+    // `set`/`delete` require the document's contents to be a mapping (or
+    // empty — `contents === null`, which `yaml` happily upgrades to a map on
+    // the first `set`). A sequence or scalar document (`- one\n- two`, `just
+    // text`) is valid YAML but not one this feature can add a `structure:`
+    // key to.
+    if (doc.contents !== null && !isMap(doc.contents)) return source
+
+    if (structure.size === 0) doc.delete('structure')
+    else doc.set('structure', block)
+
+    const yaml = doc.toString().trimEnd()
+
+    // An emptied block can leave nothing behind; a bare fence pair is noise.
+    // `parseDocument('').toString()` is '{}', so both forms have to be caught.
+    if (yaml === '' || yaml === '{}') return body
+    return `---\n${yaml}\n---\n\n${body}`
+  } catch {
+    // Backstop only — see the docstring. Any future `yaml` edge case the
+    // checks above did not anticipate falls back to the one answer that is
+    // always safe: the writer's manuscript, unchanged.
+    return source
   }
-
-  const doc = frontmatter === null ? new Document({}) : parseDocument(frontmatter)
-  if (structure.size === 0) doc.delete('structure')
-  else doc.set('structure', block)
-
-  const yaml = doc.toString().trimEnd()
-
-  // An emptied block can leave nothing behind; a bare fence pair is noise.
-  // `parseDocument('').toString()` is '{}', so both forms have to be caught.
-  if (yaml === '' || yaml === '{}') return body
-  return `---\n${yaml}\n---\n\n${body}`
 }

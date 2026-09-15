@@ -112,6 +112,22 @@ export function MarkdownEditor({
   // current by the re-hydrate effect below.
   const frontmatter = useRef<string | null>(parsed.frontmatter)
 
+  // The body the editor's content was last synchronised with — the initial
+  // mount content, or the body of the most recent `setContent`/`onUpdate`.
+  //
+  // The re-hydrate effect below compares the INCOMING body against this,
+  // rather than re-serialising the editor's current content and comparing
+  // that (the old approach). Re-serialising only equals the source when the
+  // source is already in the serialiser's canonical spelling: `_em_` ->
+  // `*em*`, `* one` -> `- one`, a setext heading -> ATX are all routine in a
+  // file written by hand or exported from Obsidian, and none of them make
+  // the re-serialised form converge to `parsed.body` — so under the old
+  // guard, a dialog write that only changes `structure:` in the frontmatter
+  // (and therefore leaves the body byte-for-byte identical) still replaced
+  // the whole document via `setContent`, discarding the writer's selection,
+  // on every single such edit.
+  const syncedBody = useRef(parsed.body)
+
   // Built once: changing the extension list would rebuild the whole editor and
   // discard the document with it.
   const extensions = useMemo(
@@ -152,13 +168,14 @@ export function MarkdownEditor({
     onUpdate: ({ editor }) => {
       if (timer.current !== null) window.clearTimeout(timer.current)
       timer.current = window.setTimeout(() => {
+        // The serialised markdown IS the new body, by definition — record it
+        // as synchronised before `onChange` feeds it back down as `value`, so
+        // the re-hydrate effect below recognises this as our own edit rather
+        // than an external change and does not re-run `setContent` on it.
+        const body = serializeToMarkdown(editor.getJSON() as never)
+        syncedBody.current = body
         emitting.current = true
-        onChange(
-          joinFrontmatter(
-            frontmatter.current,
-            serializeToMarkdown(editor.getJSON() as never),
-          ),
-        )
+        onChange(joinFrontmatter(frontmatter.current, body))
         window.setTimeout(() => {
           emitting.current = false
         }, 0)
@@ -166,19 +183,23 @@ export function MarkdownEditor({
     },
   })
 
-  // Re-hydrate only when the document changed underneath us — an upload, a
-  // restored session, or a paste into the source view — never on our own edits.
-  //
-  // The frontmatter is held aside rather than handed to the editor: there is no
-  // node type for it, so anything given to the editor comes back without it.
+  // Re-hydrate only when the document's BODY changed underneath us — an
+  // upload, a restored session, or a paste into the source view — never on
+  // our own edits, and never on a dialog write that only touched frontmatter
+  // (the Structure section writes `structure:` back via `writeStructure`
+  // while leaving the body untouched, since the editor never sees the
+  // frontmatter in the first place — see `syncedBody` above).
   useEffect(() => {
     if (!editor || emitting.current) return
+    // Load-bearing regardless of whether the body changed: a frontmatter-only
+    // dialog write must still be picked up, or the next self-originated edit
+    // would serialise the STALE frontmatter back in.
     frontmatter.current = parsed.frontmatter
-    const current = serializeToMarkdown(editor.getJSON() as never)
-    if (current.trim() === parsed.body.trim()) return
+    if (parsed.body === syncedBody.current) return
     editor.commands.setContent(mdastToPm(parsed.bodyTree) as never, {
       emitUpdate: false,
     })
+    syncedBody.current = parsed.body
   }, [editor, parsed])
 
   useEffect(() => {
