@@ -112,3 +112,31 @@ describe('front and main matter', () => {
     }
   })
 })
+
+describe('matter divisions', () => {
+  it('opens main matter before the body when the document declares no parts', () => {
+    const { tex } = convert('# A Chapter\n', cfg({ character: 'book' }))
+    expect(tex).toContain('\\frontmatter')
+    expect(tex.indexOf('\\mainmatter')).toBeLessThan(tex.indexOf('\\chapter{A Chapter}'))
+    expect(tex.split('\\mainmatter').length - 1).toBe(1)
+  })
+
+  it('leaves main matter to the body when the document declares front matter', () => {
+    const source =
+      '---\nstructure:\n  Dedication: { role: front }\n---\n\n# Dedication\n\n# A Chapter\n'
+    const { tex } = convert(source, cfg({ character: 'book' }))
+    // Exactly one \mainmatter, and it falls between the two parts rather than
+    // before both of them.
+    expect(tex.split('\\mainmatter').length - 1).toBe(1)
+    expect(tex.indexOf('Dedication')).toBeLessThan(tex.indexOf('\\mainmatter'))
+    expect(tex.indexOf('\\mainmatter')).toBeLessThan(tex.indexOf('\\chapter{A Chapter}'))
+  })
+
+  it('never emits matter divisions in an article', () => {
+    const source = '---\nstructure:\n  Preface: { role: front }\n---\n\n# Preface\n'
+    const { tex } = convert(source, cfg({ character: 'article' }))
+    expect(tex).not.toContain('\\frontmatter')
+    expect(tex).not.toContain('\\mainmatter')
+    expect(tex).not.toContain('\\backmatter')
+  })
+})

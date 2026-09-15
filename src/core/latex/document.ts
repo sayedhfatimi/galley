@@ -49,7 +49,11 @@ export function convert(
 ): ConvertResult {
   const tree = parseMarkdown(source)
   const frontmatter = extractFrontmatter(tree)
-  const { body, diagnostics, images } = serializeToLatex(tree, config, available)
+  const { body, diagnostics, images, ownsMatterDivisions } = serializeToLatex(
+    tree,
+    config,
+    available,
+  )
 
   const { title, subtitle, author, date } = config.metadata
   const hasTitleBlock = Boolean(title || subtitle || author || date)
@@ -64,7 +68,10 @@ export function convert(
   if (matter) parts.push('\\frontmatter', '')
   if (hasTitleBlock) parts.push('\\maketitle', '')
   if (config.toc.include) parts.push('\\tableofcontents', '')
-  if (matter) parts.push('\\mainmatter', '')
+  // The body opens main matter itself when it has front or back matter to
+  // separate from. Emitting one here as well would open the division twice and
+  // reset the page numbering in the middle of the front matter.
+  if (matter && !ownsMatterDivisions) parts.push('\\mainmatter', '')
   // A frontmatter-only document still compiles; the body is simply empty.
   if (body.length > 0) parts.push(body, '')
   parts.push('\\end{document}', '')
