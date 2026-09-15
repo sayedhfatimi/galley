@@ -407,18 +407,23 @@ describe('writeFrontmatterKey', () => {
     expect(out).toContain('title: T')
   })
 
-  // The v2.1.0 bug this exists once to prevent: deleting the last real key
-  // from a comment-only frontmatter left an empty map, whose literal `{}`
-  // shipped in the writer's manuscript alongside their comment.
-  // The v2.1.0 bug this exists once to prevent: a frontmatter that is only a
-  // comment parses to `contents === null`, and `yaml` stringifies that as a
-  // literal `{}` or `null` — which shipped in the writer's manuscript
-  // alongside their comment.
+  // The v2.1.0 "Fix 4" case, at this level. A frontmatter that is only a
+  // comment parses with `contents === null`, so the comment sits on the
+  // DOCUMENT rather than on a key. Adding a key makes contents a map; removing
+  // it again leaves an EMPTY map, which `yaml` stringifies as `# a comment\n{}`
+  // — and that `{}` once shipped in a writer's manuscript.
+  //
+  // The add step is load-bearing. Calling `delete` on a null-contents document
+  // THROWS (yaml@2.9: "Expected a YAML collection as document contents"), the
+  // backstop catches it, and the source comes back untouched — so a version of
+  // this test that skips the add asserts against its own unmodified input and
+  // passes against a `writeFrontmatterKey` that strips nothing at all.
   it('strips the empty-document token but keeps a document-level comment', () => {
-    const out = writeFrontmatterKey('---\n# note\n---\n\n# C\n', 'absent', null)
-    expect(out).toContain('# note')
+    const added = writeFrontmatterKey('---\n# a comment\n---\n\n# C\n', 'x', { a: 1 })
+    const out = writeFrontmatterKey(added, 'x', null)
+    expect(out).toContain('# a comment')
     expect(out).not.toContain('{}')
-    expect(out).not.toContain('null')
+    expect(out).toContain('# C')
   })
 
   // Verified against yaml@2.9: a comment binds to the node that FOLLOWS it, so
