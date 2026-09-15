@@ -38,6 +38,13 @@ const ROLES: readonly PartRole[] = ['front', 'main', 'back']
  * The plain text of a heading, for matching against a `structure:` key and for
  * writing a contents entry. Deliberately NOT the LaTeX form: the reader typed
  * "The Illusion of Truth", not "The Illusion of \textbf{Truth}".
+ *
+ * KNOWN LIMITATION, not handled here: maths and inline code inside a heading
+ * reach the contents entry as their escaped literal source (`$x^2$`, `` `f(x)`
+ * ``) rather than something a reader would recognise as the formula or the
+ * code. Fixing that needs a design decision — what a formula should even look
+ * like in running contents-page text — that has not been made. Left as-is
+ * deliberately, so the next reader does not assume it was considered.
  */
 export function headingText(node: Heading): string {
   let out = ''

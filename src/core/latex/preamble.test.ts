@@ -160,6 +160,25 @@ describe('buildPreamble', () => {
     })
   })
 
+  describe('section numbering (Fix 7)', () => {
+    // The old implementation starred \section, which is gated on depth > 1 in
+    // #heading — so a depth-1 \section (an article has no chapter level)
+    // stayed numbered while its subsections went unnumbered, and a starred
+    // command writes nothing to the .toc regardless of toc.depth. secnumdepth
+    // fixes both: it applies uniformly by LEVEL rather than by call site, and
+    // an unstarred command still gets its contents entry.
+    it('sets secnumdepth to 0 when sections are unnumbered', () => {
+      const out = buildPreamble(cfg({ sections: { numbered: false } }))
+      expect(out).toContain('\\setcounter{secnumdepth}{0}')
+    })
+
+    it('emits nothing extra when sections stay numbered, preserving v2.0.0 output', () => {
+      expect(buildPreamble(cfg({ sections: { numbered: true } }))).not.toContain(
+        'secnumdepth',
+      )
+    })
+  })
+
   it('is written for a human reader: commented and not run together', () => {
     const out = buildPreamble(presetFor('book'))
     expect(

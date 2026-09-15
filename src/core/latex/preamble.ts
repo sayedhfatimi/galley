@@ -215,8 +215,23 @@ export function buildPreamble(config: GalleyConfig): string {
     ...runningHeads(config.character, config.twoSided),
   )
 
+  const contentsLines: string[] = []
   if (config.toc.include) {
-    push('', '% ---- Contents ----', `\\setcounter{tocdepth}{${config.toc.depth}}`)
+    contentsLines.push(`\\setcounter{tocdepth}{${config.toc.depth}}`)
+  }
+  if (!config.sections.numbered) {
+    // secnumdepth, not a starred command, is the lever for "sections
+    // unnumbered": book.cls:355 shows \chapter sits at level 0 and \section at
+    // level 1, so secnumdepth 0 leaves \chapter numbered while \section and
+    // below lose their numbers — in an article, where \section IS level 1,
+    // the same setting reaches it too. Starring cannot do this selectively
+    // (it is all-or-nothing per call site) and a starred command writes
+    // nothing to the .toc, silently overriding toc.depth above; secnumdepth
+    // leaves the contents entry alone.
+    contentsLines.push('\\setcounter{secnumdepth}{0}')
+  }
+  if (contentsLines.length > 0) {
+    push('', '% ---- Contents ----', ...contentsLines)
   }
 
   const title = titleBlock(config)

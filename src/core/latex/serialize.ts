@@ -121,6 +121,13 @@ class Serializer {
    */
   readonly #available: ReadonlySet<string> | undefined
   #structure: Map<string, PartSpec> = new Map()
+  /**
+   * Root-level depth-1 headings, by node identity. `#blockquote` calls
+   * `#blocks` and `#listItem` calls `#block`, so a quoted or bulleted heading
+   * (Obsidian callouts are blockquotes) also reaches `#heading` at depth 1 —
+   * this is what lets `#heading` tell a real part from one of those.
+   */
+  #parts = new Set<Heading>()
   /** Highest matter rank reached, to detect parts written out of order. */
   #highestRank = -1
   /** The division currently open, so a transition is emitted only on change. */
@@ -151,24 +158,66 @@ class Serializer {
    * nothing" is only knowable once every heading has been seen.
    */
   #prepareStructure(tree: Root): void {
+    // Collected unconditionally — not just when a `structure:` block exists —
+    // because this set is also what `#heading` uses to decide whether a
+    // depth-1 node is a part at all. See the field comment.
+    for (const node of tree.children) {
+      if (node.type === 'heading' && node.depth === 1) this.#parts.add(node)
+    }
+
     this.#structure = readStructure(frontmatterData(tree))
     if (this.#structure.size === 0) return
 
     const titles = new Set<string>()
-    for (const node of tree.children) {
-      if (node.type === 'heading' && node.depth === 1) titles.add(headingText(node))
+    // Two root headings with identical text share one PartSpec, because parts
+    // are keyed by text (see structure.ts). That is invisible when both are
+    // plain chapters, but once EITHER is named in `structure:` its role,
+    // numbering and listing apply to both headings, silently, and can walk
+    // the matter state machine somewhere the writer never intended. Flagged
+    // here rather than left for the reader to notice in the contents page.
+    const duplicated = new Set<string>()
+    for (const node of this.#parts) {
+      const title = headingText(node)
+      if (titles.has(title)) duplicated.add(title)
+      titles.add(title)
     }
-
-    for (const key of this.#structure.keys()) {
-      if (titles.has(key)) continue
+    for (const title of duplicated) {
       this.#diagnostics.add(
-        'structure-unmatched',
-        'A part named in the document setup no longer matches any chapter heading, so it was set as main matter. Renaming a heading loses its setting.',
-        key,
+        'structure-duplicate-heading',
+        'Two chapters share this title, and one setting governs every heading with the same text. Give one of them a different title to set them separately.',
+        title,
       )
     }
 
-    const divided = [...this.#structure.values()].some((p) => p.role !== 'main')
+    for (const [key, spec] of this.#structure) {
+      if (!titles.has(key)) {
+        this.#diagnostics.add(
+          'structure-unmatched',
+          'A part named in the document setup no longer matches any chapter heading, so it was set as main matter. Renaming a heading loses its setting.',
+          key,
+        )
+        continue
+      }
+      // Verified at book.cls:361-362: an unstarred \chapter inside \frontmatter
+      // calls \addcontentsline itself, unconditionally. There is no way to keep
+      // a numbered chapter out of the contents, so accepting the setting would
+      // be an inert control — silently doing nothing rather than saying so.
+      if (spec.numbered && !spec.listed) {
+        this.#diagnostics.add(
+          'structure-unlistable',
+          'A numbered chapter always appears in the contents. To leave it out, make the chapter unnumbered too.',
+          key,
+        )
+      }
+    }
+
+    // Only entries that actually matched a heading can open a division — one
+    // `structure-unmatched` has just reported does nothing, so counting it
+    // here would make a document with no matching parts believe it owns its
+    // own \mainmatter/\backmatter and then never emit either.
+    const divided = [...this.#structure].some(
+      ([key, spec]) => titles.has(key) && spec.role !== 'main',
+    )
     if (!divided) return
 
     if (this.#config.character === 'book') {
@@ -267,26 +316,38 @@ class Serializer {
     const command = sectioningCommand(node.depth, this.#config.character)
     const text = this.#inline(node.children)
 
-    // Only a top-level heading is a part. Everything below it is a section, and
-    // sections are numbered or not as a whole document rather than one at a time.
-    if (node.depth > 1) {
-      const star = this.#config.sections.numbered ? '' : '*'
-      return `\\${command}${star}{${text}}`
-    }
+    // Only a ROOT-level heading is a part. `#blockquote` calls `#blocks` and
+    // `#listItem` calls `#block`, so a heading quoted or bulleted also arrives
+    // here at depth 1 — `#parts` (built in `#prepareStructure`, by node
+    // identity) is what tells the two apart. Anything not in that set is an
+    // ordinary sectioning command: no part lookup, no matter transition, no
+    // contents entry of its own. Sections are numbered or not as a whole
+    // document via secnumdepth in the preamble, not starred here — see Fix 7.
+    if (!this.#parts.has(node)) return `\\${command}{${text}}`
 
     const part = this.#partFor(node)
     const transition = this.#matterTransition(part.role)
 
-    if (part.numbered) return `${transition}\\${command}{${text}}`
+    if (part.numbered) {
+      // book.cls:359-360: \chapter's optional argument is exactly the
+      // short-title mechanism, so a numbered part with a tocTitle gets a
+      // short contents entry for free. Without one this is the plain form,
+      // byte-for-byte what v2.0.0 produced.
+      const short = part.tocTitle ? `[${escapeText(part.tocTitle)}]` : ''
+      return `${transition}\\${command}${short}{${text}}`
+    }
 
     // A starred command writes no contents entry, so a listed part has to make
     // its own. The plain heading text is used, not the LaTeX form: an entry is
     // an argument and must be escaped, but the reader's words are what belongs
-    // in a table of contents.
+    // in a table of contents. Suppressed entirely when the document has no
+    // contents page to receive it — a hand-written line that does nothing is
+    // noise in a .tex the reader edits.
     const entry = part.tocTitle ?? headingText(node)
-    const listing = part.listed
-      ? `\n\\addcontentsline{toc}{${command}}{${escapeText(entry)}}`
-      : ''
+    const listing =
+      part.listed && this.#config.toc.include
+        ? `\n\\addcontentsline{toc}{${command}}{${escapeText(entry)}}`
+        : ''
     return `${transition}\\${command}*{${text}}${listing}`
   }
 
@@ -303,14 +364,23 @@ class Serializer {
 
     const rank = roleRank(role)
     if (rank < this.#highestRank) {
+      // Still emit the transition below — book.cls's \backmatter runs
+      // \@mainmatterfalse WITHOUT restoring \pagenumbering{arabic}, so
+      // returning '' here (the old behaviour) left every part written after
+      // an out-of-order one, including a later \mainmatter division, with no
+      // transition of its own: the whole rest of the book stayed in roman
+      // numerals. These are idempotent switches, so honouring document order
+      // — including its divisions — is correct; only the diagnostic
+      // disagrees with the order.
       this.#diagnostics.add(
         'structure-order',
         'Parts are not in book order — front, then main, then back matter. They were typeset in the order they were written rather than rearranged.',
         role,
       )
-      return ''
     }
-    this.#highestRank = rank
+    // The maximum seen, not the latest: an out-of-order part must not lower
+    // the bar for what counts as "out of order" for the parts after it.
+    this.#highestRank = Math.max(this.#highestRank, rank)
 
     if (role === this.#openRole) return ''
     this.#openRole = role

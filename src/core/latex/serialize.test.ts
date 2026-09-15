@@ -368,24 +368,31 @@ describe('images the reader has not attached', () => {
 })
 
 describe('part structure', () => {
-  const book = (source: string) => tex(source, { character: 'book' })
+  const book = (source: string, over: Partial<GalleyConfig> = {}) =>
+    tex(source, { character: 'book', ...over })
 
   it('numbers a chapter by default, exactly as before', () => {
     expect(book('# A Chapter\n')).toContain('\\chapter{A Chapter}')
     expect(book('# A Chapter\n')).not.toContain('\\chapter*')
   })
 
+  // A contents page has to be requested for \addcontentsline to be worth
+  // writing at all — see Fix 8 below — so these part/toc tests turn one on.
+  const withToc = { toc: { include: true, depth: 1 } }
+
   it('stars an unnumbered part and lists it by hand', () => {
     const tex = book(
       '---\nstructure:\n  Dedication: { role: front }\n---\n\n# Dedication\n\nTo my mother.\n',
+      withToc,
     )
     expect(tex).toContain('\\chapter*{Dedication}')
     expect(tex).toContain('\\addcontentsline{toc}{chapter}{Dedication}')
   })
 
-  it('omits the contents entry when a part is unlisted', () => {
+  it('omits the contents entry when a part is unlisted, even with a contents page', () => {
     const tex = book(
       '---\nstructure:\n  Copyright: { role: front, listed: false }\n---\n\n# Copyright\n\n(c) 2026.\n',
+      withToc,
     )
     expect(tex).toContain('\\chapter*{Copyright}')
     expect(tex).not.toContain('\\addcontentsline')
@@ -394,6 +401,7 @@ describe('part structure', () => {
   it('uses the short title in the contents and the full one in the heading', () => {
     const tex = book(
       '---\nstructure:\n  "Introduction: Reality is a Stage": { role: front, toc_title: Introduction }\n---\n\n# Introduction: Reality is a Stage\n',
+      withToc,
     )
     expect(tex).toContain('\\chapter*{Introduction: Reality is a Stage}')
     expect(tex).toContain('\\addcontentsline{toc}{chapter}{Introduction}')
@@ -402,6 +410,7 @@ describe('part structure', () => {
   it('escapes a contents entry, which is LaTeX like any other argument', () => {
     const tex = book(
       '---\nstructure:\n  Cost: { role: front, toc_title: "100% & rising" }\n---\n\n# Cost\n',
+      withToc,
     )
     expect(tex).toContain('\\addcontentsline{toc}{chapter}{100\\% \\& rising}')
   })
@@ -417,16 +426,6 @@ describe('part structure', () => {
     expect(found?.detail).toBe('Dedicaton')
   })
 
-  it('diagnoses parts written out of matter order but does not reorder them', () => {
-    const source =
-      '---\nstructure:\n  Afterword: { role: back }\n  Chapter One: { role: main }\n---\n\n# Afterword\n\n# Chapter One\n'
-    expect(
-      diags(source, { character: 'book' }).some((d) => d.kind === 'structure-order'),
-    ).toBe(true)
-    const body = tex(source, { character: 'book' })
-    expect(body.indexOf('Afterword')).toBeLessThan(body.indexOf('Chapter One'))
-  })
-
   it('ignores roles in an article and says so, but still honours numbering', () => {
     const source = '---\nstructure:\n  Preface: { role: front }\n---\n\n# Preface\n'
     const body = tex(source, { character: 'article' })
@@ -435,5 +434,117 @@ describe('part structure', () => {
     expect(
       diags(source, { character: 'article' }).some((d) => d.kind === 'structure-ignored'),
     ).toBe(true)
+  })
+
+  // ---- Fix 1: only a ROOT-level heading is a part ----
+
+  it('does not treat a blockquoted heading as a part (Fix 1)', () => {
+    // Obsidian callouts are blockquotes, so `> # …` is reachable from an
+    // ordinary paste. Before the fix this heading matched the structure map
+    // by text, opened \mainmatter INSIDE the quote environment, and latched
+    // the open role so the real chapter after it got no transition at all.
+    const source =
+      '---\nstructure:\n  Notes: { role: back }\n---\n\n> # A quoted headline\n\n# Real Chapter\n\n# Notes\n'
+    const body = tex(source, { character: 'book' })
+    // The quoted heading is an ordinary, unstarred chapter — no part lookup,
+    // no transition — typeset where it sits, inside the quote.
+    expect(body).toContain('\\begin{quote}\n\\chapter{A quoted headline}\n\\end{quote}')
+    // The real chapter after it still gets \mainmatter: the whole point.
+    expect(body).toContain('\\mainmatter\n\n\\chapter{Real Chapter}')
+    expect(body.indexOf('\\mainmatter')).toBeGreaterThan(body.indexOf('\\end{quote}'))
+  })
+
+  // ---- Fix 2: an out-of-order part still opens its division ----
+
+  it('still opens each division when parts are declared out of matter order (Fix 2)', () => {
+    // book.cls's \backmatter clears \@mainmatterfalse WITHOUT restoring
+    // \pagenumbering{arabic}, so returning '' for the transition here (the
+    // old behaviour) left the chapter after it, and everything after THAT,
+    // stuck in roman numerals with no chapter numbers at all. The diagnostic
+    // still fires; the division still opens — document order is honoured,
+    // not corrected.
+    const source =
+      '---\nstructure:\n  Afterword: { role: back }\n  Chapter One: { role: main }\n---\n\n# Afterword\n\n# Chapter One\n'
+    expect(
+      diags(source, { character: 'book' }).some((d) => d.kind === 'structure-order'),
+    ).toBe(true)
+
+    const body = tex(source, { character: 'book' })
+    expect(body).toContain('\\backmatter\n\n\\chapter*{Afterword}')
+    expect(body).toContain('\\mainmatter\n\n\\chapter{Chapter One}')
+    // Still typeset in document order, not rearranged into book order.
+    expect(body.indexOf('Afterword')).toBeLessThan(body.indexOf('Chapter One'))
+  })
+
+  // ---- Fix 3: \chapter[short]{long} for a numbered part with a tocTitle ----
+
+  it('emits the short/long chapter form for a numbered part with a tocTitle (Fix 3)', () => {
+    const source =
+      '---\nstructure:\n  "Cost & Value": { toc_title: "100% Off" }\n---\n\n# Cost & Value\n'
+    // Both arguments are LaTeX arguments and are escaped independently.
+    expect(book(source)).toBe('\\chapter[100\\% Off]{Cost \\& Value}')
+  })
+
+  // ---- Fix 4: listed:false on a numbered part cannot be honoured ----
+
+  it('diagnoses listed:false on a numbered part rather than silently ignoring it (Fix 4)', () => {
+    const source =
+      '---\nstructure:\n  Chapter One: { listed: false }\n---\n\n# Chapter One\n'
+    const found = diags(source, { character: 'book' }).find(
+      (d) => d.kind === 'structure-unlistable',
+    )
+    expect(found).toBeDefined()
+    expect(found?.detail).toBe('Chapter One')
+    // The setting does nothing: an unstarred \chapter always writes its own
+    // contents entry (book.cls:361-362), so the output is the plain form.
+    expect(book(source)).toBe('\\chapter{Chapter One}')
+  })
+
+  // ---- Fix 5: duplicate root-level headings share one PartSpec ----
+
+  it('diagnoses two root headings that share a title (Fix 5)', () => {
+    // Front, then main, then front again by TEXT — even though the second
+    // "Notes" is meant as end matter, it shares the first Notes's PartSpec
+    // and so re-opens front matter, which is also why structure-order fires
+    // on a document that, in the writer's intent, is in perfect order.
+    const source =
+      '---\nstructure:\n  Notes: { role: front }\n  Chapter One: { role: main }\n---\n\n# Notes\n\n# Chapter One\n\n# Notes\n'
+    const found = diags(source, { character: 'book' }).find(
+      (d) => d.kind === 'structure-duplicate-heading',
+    )
+    expect(found).toBeDefined()
+    expect(found?.detail).toBe('Notes')
+  })
+
+  // ---- Fix 6: ownsMatterDivisions reflects only parts that actually matched ----
+
+  it('does not own the matter divisions when no declared part matches a heading (Fix 6)', () => {
+    const source =
+      '---\nstructure:\n  Preface: { role: front }\n---\n\nNo heading at all.\n'
+    const result = serializeToLatex(parseMarkdown(source), {
+      ...DEFAULT_CONFIG,
+      character: 'book',
+    })
+    expect(result.ownsMatterDivisions).toBe(false)
+  })
+
+  // ---- Fix 7: secnumdepth, not starring, controls section numbering ----
+
+  it('never stars a heading for section numbering, in any character (Fix 7)', () => {
+    // Starring is gone from #heading entirely; secnumdepth in the preamble
+    // (see preamble.test.ts) is the lever now.
+    const source = '# Top\n\n## Sub\n\n### Subsub\n'
+    for (const character of ['article', 'book'] as const) {
+      expect(tex(source, { character, sections: { numbered: false } })).not.toContain('*')
+    }
+  })
+
+  // ---- Fix 8: no \addcontentsline when the contents page is switched off ----
+
+  it('omits \\addcontentsline entirely when there is no contents page to receive it (Fix 8)', () => {
+    const source = '---\nstructure:\n  Dedication: { role: front }\n---\n\n# Dedication\n'
+    const out = book(source, { toc: { include: false, depth: 2 } })
+    expect(out).toContain('\\chapter*{Dedication}')
+    expect(out).not.toContain('\\addcontentsline')
   })
 })

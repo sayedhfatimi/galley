@@ -24,6 +24,10 @@ export type DiagnosticKind =
   | 'structure-order'
   /** Front and back matter were asked for in an Article or Report, which have neither. */
   | 'structure-ignored'
+  /** A numbered part was also set unlisted, which an unstarred \chapter cannot honour. */
+  | 'structure-unlistable'
+  /** Two root-level headings share the same text, so one setting governs both. */
+  | 'structure-duplicate-heading'
 
 export interface Diagnostic {
   kind: DiagnosticKind
