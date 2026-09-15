@@ -118,6 +118,71 @@ export function roleRank(role: PartRole): number {
 }
 
 /**
+ * Parse a frontmatter block into a document `writeStructure` can safely
+ * `set`/`delete` on, or `null` when it cannot.
+ *
+ * Shared by `writeStructure` and `canWriteStructure` so the two can never
+ * describe different sets of documents. That drift already happened once:
+ * the UI grew its own "is this readable" check alongside this guard, the two
+ * were written independently, and they disagreed on empty/whitespace/
+ * comment-only frontmatter — `yaml.parse` calls it unreadable (returns
+ * `null`), this guard calls it writable (`contents === null`, which `yaml`
+ * upgrades to a map on the first `set`). Routing both callers through this
+ * one function makes that kind of drift impossible rather than merely
+ * unlikely: there is only one place the "can this be rewritten" question is
+ * answered.
+ *
+ * `parseDocument` does not throw, but it *collects* errors, and
+ * `Document.toString()` refuses ("Document with errors cannot be
+ * stringified") once any are present; `set`/`delete` likewise assert the
+ * contents are a keyable collection and throw otherwise (a sequence
+ * document, a scalar document). The try/catch is a backstop, not the primary
+ * defence: the checks below are what make this correct; the catch is
+ * insurance against a `yaml` edge case neither of them anticipated. This
+ * function is therefore TOTAL: it must never throw.
+ */
+function parseWritableFrontmatter(frontmatter: string | null) {
+  try {
+    const doc = frontmatter === null ? new Document({}) : parseDocument(frontmatter)
+
+    // A document that already failed to parse cleanly (duplicate keys, tab
+    // indentation, an unclosed flow collection, …) cannot be safely rewritten:
+    // `toString()` would throw on it regardless of what we do to `structure`.
+    // Existing content the writer already had takes priority over this
+    // feature working, so it is left untouched.
+    if (doc.errors.length > 0) return null
+
+    // `set`/`delete` require the document's contents to be a mapping (or
+    // empty — `contents === null`, which `yaml` happily upgrades to a map on
+    // the first `set`). A sequence or scalar document (`- one\n- two`, `just
+    // text`) is valid YAML but not one this feature can add a `structure:`
+    // key to.
+    if (doc.contents !== null && !isMap(doc.contents)) return null
+
+    return doc
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether `writeStructure` will actually rewrite this document's frontmatter,
+ * as opposed to handing the source back unchanged.
+ *
+ * Exists so the UI can explain a no-op before the writer hits it, rather than
+ * showing controls that silently do nothing. It has to run on every keystroke
+ * of the surrounding document (`ConfigPanel`'s Structure section recomputes
+ * it from `source`), so it stays cheap: parse the frontmatter block once,
+ * same as `writeStructure` itself, via the shared guard above rather than a
+ * second parse of `frontmatterData`'s making — the whole point is that this
+ * and `writeStructure` see this document the same way.
+ */
+export function canWriteStructure(source: string): boolean {
+  const { frontmatter } = splitFrontmatter(source)
+  return parseWritableFrontmatter(frontmatter) !== null
+}
+
+/**
  * Write a structure block back into a document's own frontmatter.
  *
  * The boundary comes from `splitFrontmatter`, which derives it from the real
@@ -132,20 +197,19 @@ export function roleRank(role: PartRole): number {
  *
  * This function is TOTAL: it must never throw, because it runs from a Select's
  * `onValueChange` and there is no React error boundary anywhere in this app —
- * an uncaught throw here unmounts the whole root to a white page. `parseDocument`
- * does not throw, but it *collects* errors, and `Document.toString()` refuses
- * ("Document with errors cannot be stringified") once any are present; `set`/
- * `delete` likewise assert the contents are a keyable collection and throw
- * otherwise (a sequence document, a scalar document). Frontmatter this broken
- * is left exactly as the writer had it — matching `frontmatter.ts`'s rule that
- * malformed frontmatter is not a failure — rather than rewritten or dropped.
- * The try/catch is a backstop, not the primary defence: the checks above are
- * what make this correct; the catch is insurance against a `yaml` edge case
- * neither of them anticipated.
+ * an uncaught throw here unmounts the whole root to a white page. Whether the
+ * frontmatter can be rewritten at all is decided by `parseWritableFrontmatter`
+ * (see there for why that check is shared with `canWriteStructure` rather than
+ * repeated here); building and applying the `structure:` block itself is
+ * still wrapped in its own try/catch as a second backstop, per that function's
+ * docstring.
  */
 export function writeStructure(source: string, structure: Map<string, PartSpec>): string {
   const { frontmatter, body } = splitFrontmatter(source)
   if (frontmatter === null && structure.size === 0) return source
+
+  const doc = parseWritableFrontmatter(frontmatter)
+  if (doc === null) return source
 
   try {
     const block: Record<string, Record<string, unknown>> = {}
@@ -157,22 +221,6 @@ export function writeStructure(source: string, structure: Map<string, PartSpec>)
       block[heading] = entry
     }
 
-    const doc = frontmatter === null ? new Document({}) : parseDocument(frontmatter)
-
-    // A document that already failed to parse cleanly (duplicate keys, tab
-    // indentation, an unclosed flow collection, …) cannot be safely rewritten:
-    // `toString()` would throw on it regardless of what we do to `structure`.
-    // Existing content the writer already had takes priority over this
-    // feature working, so it is left untouched.
-    if (doc.errors.length > 0) return source
-
-    // `set`/`delete` require the document's contents to be a mapping (or
-    // empty — `contents === null`, which `yaml` happily upgrades to a map on
-    // the first `set`). A sequence or scalar document (`- one\n- two`, `just
-    // text`) is valid YAML but not one this feature can add a `structure:`
-    // key to.
-    if (doc.contents !== null && !isMap(doc.contents)) return source
-
     if (structure.size === 0) doc.delete('structure')
     else doc.set('structure', block)
 
@@ -183,9 +231,9 @@ export function writeStructure(source: string, structure: Map<string, PartSpec>)
     if (yaml === '' || yaml === '{}') return body
     return `---\n${yaml}\n---\n\n${body}`
   } catch {
-    // Backstop only — see the docstring. Any future `yaml` edge case the
-    // checks above did not anticipate falls back to the one answer that is
-    // always safe: the writer's manuscript, unchanged.
+    // Backstop only — see `parseWritableFrontmatter`'s docstring. Any future
+    // `yaml` edge case the checks there did not anticipate falls back to the
+    // one answer that is always safe: the writer's manuscript, unchanged.
     return source
   }
 }

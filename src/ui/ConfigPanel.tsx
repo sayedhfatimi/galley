@@ -26,9 +26,10 @@ import {
 } from '@/core/config'
 import { previewFamily, TYPEFACE_NAMES, TYPEFACES, type TypefaceName } from '@/core/fonts'
 import { GUTTER_BANDS, kdpMargins } from '@/core/kdp'
-import { frontmatterData, hasFrontmatter } from '@/core/markdown/frontmatter'
+import { frontmatterData } from '@/core/markdown/frontmatter'
 import { parseMarkdown } from '@/core/markdown/parse'
 import {
+  canWriteStructure,
   DEFAULT_PART,
   headingText,
   type PartRole,
@@ -210,15 +211,16 @@ export function StructureSection({
 }) {
   const { headings, structure, unreadable } = useMemo(() => {
     const tree = parseMarkdown(source)
-    // Exactly the set of documents `writeStructure` refuses to touch (see its
-    // own docstring): frontmatter is present but `frontmatterData` could not
-    // parse it as a mapping — duplicate keys, tab indentation, an unclosed
-    // flow collection. `readStructure(null)` silently yields an empty map, so
-    // without this every heading would render at its default with nothing
-    // to explain why a change does not stick — the "control that stops
-    // working without saying so" class `structure.ts` names as a repeat bug.
     const data = frontmatterData(tree)
-    const unreadable = hasFrontmatter(tree) && data === null
+    // Delegated to `canWriteStructure` rather than a second "is this
+    // readable" check of this component's own: a UI-side duplicate of
+    // `writeStructure`'s guard is exactly what drifted last time (empty,
+    // whitespace-only and comment-only frontmatter all read as unreadable
+    // here while `writeStructure` happily wrote through them). Without this,
+    // every heading would render at its default with nothing to explain why
+    // a change does not stick — the "control that stops working without
+    // saying so" class `structure.ts` names as a repeat bug.
+    const unreadable = !canWriteStructure(source)
     const titles: string[] = []
     for (const node of tree.children) {
       if (node.type !== 'heading' || node.depth !== 1) continue

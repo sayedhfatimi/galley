@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { frontmatterData } from './markdown/frontmatter'
 import { parseMarkdown } from './markdown/parse'
 import {
+  canWriteStructure,
   DEFAULT_PART,
   headingText,
   type PartSpec,
@@ -249,5 +250,78 @@ describe('writeStructure', () => {
     const out = writeStructure('---\n---\n\n# A\n', map([entry]))
     expect(out).toContain('structure:')
     expect(out).toContain('# A')
+  })
+})
+
+describe('canWriteStructure', () => {
+  // `canWriteStructure` and `writeStructure` share one guard
+  // (`parseWritableFrontmatter`) precisely so they cannot describe different
+  // sets of documents. Asserting `canWriteStructure(src)` and
+  // `writeStructure(src, m) !== src` separately would only prove each one is
+  // internally consistent — it would happily pass even if a future edit
+  // re-introduced two diverging conditions, exactly the bug this predicate
+  // was added to fix. Comparing them against each other, fixture by fixture,
+  // is what actually pins the two together.
+  const nonEmpty: Map<string, PartSpec> = new Map([
+    ['A', { role: 'front', numbered: false, listed: true }],
+  ])
+
+  const fixtures: { name: string; source: string; writable: boolean }[] = [
+    // Writable: `writeStructure`'s guard deliberately treats these as an
+    // empty-but-valid map (`contents === null`, which `yaml` upgrades to a
+    // map on the first `set`) rather than a parse failure — see
+    // `frontmatter.ts`'s docstring on why an Obsidian export with an empty
+    // properties panel is the highest-leverage case galley serves.
+    { name: 'empty frontmatter block', source: '---\n---\n\n# A\n', writable: true },
+    {
+      name: 'whitespace-only frontmatter block',
+      source: '---\n   \n---\n\n# A\n',
+      writable: true,
+    },
+    {
+      name: 'comment-only frontmatter block',
+      source: '---\n# note\n---\n\n# A\n',
+      writable: true,
+    },
+    { name: 'no frontmatter at all', source: '# A\n', writable: true },
+
+    // Not writable: parsed with errors, or parsed clean but not a mapping —
+    // rewriting either would either throw inside `yaml` or silently discard
+    // content the writer already had.
+    {
+      name: 'malformed YAML (unclosed flow collection)',
+      source: '---\ntitle: [unclosed\n---\n\n# A\n',
+      writable: false,
+    },
+    {
+      name: 'duplicate keys',
+      source: '---\ntitle: A\ntitle: B\n---\n\n# A\n',
+      writable: false,
+    },
+    {
+      name: 'tab-indented YAML',
+      source: '---\nkey:\n\tnested: 1\n---\n\n# A\n',
+      writable: false,
+    },
+    {
+      name: 'sequence document',
+      source: '---\n- one\n- two\n---\n\n# A\n',
+      writable: false,
+    },
+    {
+      name: 'scalar document',
+      source: '---\njust text\n---\n\n# A\n',
+      writable: false,
+    },
+  ]
+
+  it.each(fixtures)('agrees with writeStructure on $name', ({ source, writable }) => {
+    expect(() => canWriteStructure(source)).not.toThrow()
+    // The pinning assertion: the predicate and the real write must agree,
+    // not merely each independently match what we expect.
+    expect(canWriteStructure(source)).toBe(writeStructure(source, nonEmpty) !== source)
+    // What we expect them to agree ON, so a fixture that accidentally pins
+    // both sides to the same wrong answer still fails.
+    expect(canWriteStructure(source)).toBe(writable)
   })
 })
