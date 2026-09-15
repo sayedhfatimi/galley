@@ -25,6 +25,15 @@ import { type DocumentCharacter, type GalleyConfig, usesChapters } from '../conf
 import { type Diagnostic, DiagnosticCollector } from '../diagnostics'
 import { findScriptGaps, typefaceOrDefault, typefacesWithGreek } from '../fonts'
 import { classifyImage, SUPPORTED_IMAGE_LIST } from '../images'
+import { frontmatterData } from '../markdown/frontmatter'
+import {
+  DEFAULT_PART,
+  headingText,
+  type PartRole,
+  type PartSpec,
+  readStructure,
+  roleRank,
+} from '../structure'
 import { escapeText, escapeUrl, isVerbatimSafe } from './escape'
 
 export interface SerializeResult {
@@ -35,6 +44,11 @@ export interface SerializeResult {
    * can supply exactly those bytes to the engine rather than the whole store.
    */
   images: string[]
+  /**
+   * True when the body emitted its own \mainmatter/\backmatter. The caller must
+   * then NOT emit \mainmatter itself, or the divisions would open twice.
+   */
+  ownsMatterDivisions: boolean
 }
 
 /**
@@ -106,6 +120,12 @@ class Serializer {
    * have no store to ask.
    */
   readonly #available: ReadonlySet<string> | undefined
+  #structure: Map<string, PartSpec> = new Map()
+  /** Highest matter rank reached, to detect parts written out of order. */
+  #highestRank = -1
+  /** The division currently open, so a transition is emitted only on change. */
+  #openRole: PartRole | null = null
+  #ownsMatterDivisions = false
 
   constructor(config: GalleyConfig, available?: ReadonlySet<string>) {
     this.#config = config
@@ -114,8 +134,61 @@ class Serializer {
 
   run(tree: Root): SerializeResult {
     this.#collectDefinitions(tree)
+    this.#prepareStructure(tree)
     const body = this.#blocks(tree.children)
-    return { body, diagnostics: this.#diagnostics.list(), images: [...this.#images] }
+    return {
+      body,
+      diagnostics: this.#diagnostics.list(),
+      images: [...this.#images],
+      ownsMatterDivisions: this.#ownsMatterDivisions,
+    }
+  }
+
+  /**
+   * Read the structure block and check it against the headings that exist.
+   *
+   * A pre-pass rather than a check during the walk, because "this entry matches
+   * nothing" is only knowable once every heading has been seen.
+   */
+  #prepareStructure(tree: Root): void {
+    this.#structure = readStructure(frontmatterData(tree))
+    if (this.#structure.size === 0) return
+
+    const titles = new Set<string>()
+    for (const node of tree.children) {
+      if (node.type === 'heading' && node.depth === 1) titles.add(headingText(node))
+    }
+
+    for (const key of this.#structure.keys()) {
+      if (titles.has(key)) continue
+      this.#diagnostics.add(
+        'structure-unmatched',
+        'A part named in the document setup no longer matches any chapter heading, so it was set as main matter. Renaming a heading loses its setting.',
+        key,
+      )
+    }
+
+    const divided = [...this.#structure.values()].some((p) => p.role !== 'main')
+    if (!divided) return
+
+    if (this.#config.character === 'book') {
+      this.#ownsMatterDivisions = true
+      return
+    }
+
+    // \frontmatter, \mainmatter and \backmatter are book-class commands. Saying
+    // nothing here would be an inert control: the reader sets front matter, the
+    // document class discards it, and nothing explains why.
+    this.#diagnostics.add(
+      'structure-ignored',
+      'Front and back matter exist only in a Book. The parts were set unnumbered as asked, but the page numbering does not restart.',
+      this.#config.character,
+    )
+  }
+
+  /** The part settings for a top-level heading. */
+  #partFor(node: Heading): PartSpec {
+    return this.#structure.get(headingText(node)) ?? DEFAULT_PART
   }
 
   /** Link and footnote definitions may appear anywhere, so gather them first. */
@@ -193,9 +266,57 @@ class Serializer {
   #heading(node: Heading): string {
     const command = sectioningCommand(node.depth, this.#config.character)
     const text = this.#inline(node.children)
-    // A blank line before a sectioning command keeps the .tex readable; the
-    // caller joins blocks with one already.
-    return `\\${command}{${text}}`
+
+    // Only a top-level heading is a part. Everything below it is a section, and
+    // sections are numbered or not as a whole document rather than one at a time.
+    if (node.depth > 1) {
+      const star = this.#config.sections.numbered ? '' : '*'
+      return `\\${command}${star}{${text}}`
+    }
+
+    const part = this.#partFor(node)
+    const transition = this.#matterTransition(part.role)
+
+    if (part.numbered) return `${transition}\\${command}{${text}}`
+
+    // A starred command writes no contents entry, so a listed part has to make
+    // its own. The plain heading text is used, not the LaTeX form: an entry is
+    // an argument and must be escaped, but the reader's words are what belongs
+    // in a table of contents.
+    const entry = part.tocTitle ?? headingText(node)
+    const listing = part.listed
+      ? `\n\\addcontentsline{toc}{${command}}{${escapeText(entry)}}`
+      : ''
+    return `${transition}\\${command}*{${text}}${listing}`
+  }
+
+  /**
+   * The \mainmatter or \backmatter that opens a division, when this document
+   * owns its divisions at all.
+   *
+   * \frontmatter is not emitted here — `document.ts` opens it before the body,
+   * alongside \maketitle and the contents, because those belong to the front
+   * matter too.
+   */
+  #matterTransition(role: PartRole): string {
+    if (!this.#ownsMatterDivisions) return ''
+
+    const rank = roleRank(role)
+    if (rank < this.#highestRank) {
+      this.#diagnostics.add(
+        'structure-order',
+        'Parts are not in book order — front, then main, then back matter. They were typeset in the order they were written rather than rearranged.',
+        role,
+      )
+      return ''
+    }
+    this.#highestRank = rank
+
+    if (role === this.#openRole) return ''
+    this.#openRole = role
+    if (role === 'main') return '\\mainmatter\n\n'
+    if (role === 'back') return '\\backmatter\n\n'
+    return ''
   }
 
   #list(node: List): string {

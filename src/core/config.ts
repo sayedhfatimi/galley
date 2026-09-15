@@ -93,6 +93,12 @@ export interface GalleyConfig {
   /** Only meaningful when top-level headings become chapters. */
   chapters: { startOnNewPage: boolean; forceRecto: boolean }
   /**
+   * Number the headings below chapter level. Off is common in trade non-fiction,
+   * where a chapter is numbered and its sections are titled but not numbered.
+   * One switch rather than one per heading: real books do not mix the two.
+   */
+  sections: { numbered: boolean }
+  /**
    * Set when the reader has asked for a specific print target, so the render
    * can check the finished document against that target's requirements. Left
    * unset, galley makes no claim about printability and says nothing about it.
@@ -139,6 +145,7 @@ export const DEFAULT_CONFIG: GalleyConfig = {
   toc: { include: false, depth: 2 },
   links: { footnoteUrls: true },
   chapters: { startOnNewPage: true, forceRecto: false },
+  sections: { numbered: true },
   metadata: {},
 }
 

@@ -366,3 +366,74 @@ describe('images the reader has not attached', () => {
     expect(images).toEqual(['x.png'])
   })
 })
+
+describe('part structure', () => {
+  const book = (source: string) => tex(source, { character: 'book' })
+
+  it('numbers a chapter by default, exactly as before', () => {
+    expect(book('# A Chapter\n')).toContain('\\chapter{A Chapter}')
+    expect(book('# A Chapter\n')).not.toContain('\\chapter*')
+  })
+
+  it('stars an unnumbered part and lists it by hand', () => {
+    const tex = book(
+      '---\nstructure:\n  Dedication: { role: front }\n---\n\n# Dedication\n\nTo my mother.\n',
+    )
+    expect(tex).toContain('\\chapter*{Dedication}')
+    expect(tex).toContain('\\addcontentsline{toc}{chapter}{Dedication}')
+  })
+
+  it('omits the contents entry when a part is unlisted', () => {
+    const tex = book(
+      '---\nstructure:\n  Copyright: { role: front, listed: false }\n---\n\n# Copyright\n\n(c) 2026.\n',
+    )
+    expect(tex).toContain('\\chapter*{Copyright}')
+    expect(tex).not.toContain('\\addcontentsline')
+  })
+
+  it('uses the short title in the contents and the full one in the heading', () => {
+    const tex = book(
+      '---\nstructure:\n  "Introduction: Reality is a Stage": { role: front, toc_title: Introduction }\n---\n\n# Introduction: Reality is a Stage\n',
+    )
+    expect(tex).toContain('\\chapter*{Introduction: Reality is a Stage}')
+    expect(tex).toContain('\\addcontentsline{toc}{chapter}{Introduction}')
+  })
+
+  it('escapes a contents entry, which is LaTeX like any other argument', () => {
+    const tex = book(
+      '---\nstructure:\n  Cost: { role: front, toc_title: "100% & rising" }\n---\n\n# Cost\n',
+    )
+    expect(tex).toContain('\\addcontentsline{toc}{chapter}{100\\% \\& rising}')
+  })
+
+  it('diagnoses an entry that matches no heading rather than ignoring it', () => {
+    // "Dedicaton" is a deliberate misspelling: this is what a retitled heading
+    // looks like from the structure block's point of view.
+    const found = diags(
+      '---\nstructure:\n  Dedicaton: { role: front }\n---\n\n# Dedication\n',
+      { character: 'book' },
+    ).find((d) => d.kind === 'structure-unmatched')
+    expect(found).toBeDefined()
+    expect(found?.detail).toBe('Dedicaton')
+  })
+
+  it('diagnoses parts written out of matter order but does not reorder them', () => {
+    const source =
+      '---\nstructure:\n  Afterword: { role: back }\n  Chapter One: { role: main }\n---\n\n# Afterword\n\n# Chapter One\n'
+    expect(
+      diags(source, { character: 'book' }).some((d) => d.kind === 'structure-order'),
+    ).toBe(true)
+    const body = tex(source, { character: 'book' })
+    expect(body.indexOf('Afterword')).toBeLessThan(body.indexOf('Chapter One'))
+  })
+
+  it('ignores roles in an article and says so, but still honours numbering', () => {
+    const source = '---\nstructure:\n  Preface: { role: front }\n---\n\n# Preface\n'
+    const body = tex(source, { character: 'article' })
+    expect(body).toContain('\\section*{Preface}')
+    expect(body).not.toContain('\\frontmatter')
+    expect(
+      diags(source, { character: 'article' }).some((d) => d.kind === 'structure-ignored'),
+    ).toBe(true)
+  })
+})
