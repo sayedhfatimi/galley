@@ -81,6 +81,16 @@ describe('buildFigureResolver', () => {
     expect(resolve('missing.png', 'ch1/chapter.md')).toBeNull()
   })
 
+  // A reference that climbs out of the project collapses to the root rather
+  // than escaping: `normalise` pops on an empty array, which is a no-op. The
+  // result can only ever match something in `figurePaths`, so nothing outside
+  // the project is reachable — but that is a property worth pinning rather
+  // than an accident of `Array.pop`, because Task 10 builds diagnostics on it.
+  it('cannot resolve outside the project folder', () => {
+    expect(resolve('../../cover.png', 'ch1/chapter.md')).toBe('cover.png')
+    expect(resolve('../../../nope.png', 'ch3/deep/chapter.md')).toBeNull()
+  })
+
   // The above "falls back to a name search" case is satisfied by 'cover.png'
   // sitting at the project root, so exact.has(wanted) alone (step 2) already
   // resolves it without ever reaching the by-name bucket (step 3). This case
