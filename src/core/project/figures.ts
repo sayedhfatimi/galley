@@ -29,11 +29,17 @@ function fingerprint(input: string): string {
 /**
  * The engine-side name for a figure at this project-relative path.
  *
- * The path is flattened BEFORE sanitising, because `sanitizeImageName` keeps
- * only the last path segment — handing it a path would discard exactly the part
- * that makes the name unique. The fingerprint is appended AFTER, because the
- * sanitiser truncates the stem to 64 characters and two deep paths can share
- * their first 64.
+ * **The fingerprint is what makes the name unique**, and it is appended AFTER
+ * sanitising because the sanitiser truncates the stem to 64 characters — two
+ * deep paths can share their first 64, which is the collision path identity
+ * exists to remove.
+ *
+ * **The flatten is what makes the name legible**, and that is its whole job.
+ * `sanitizeImageName` keeps only the last path segment, so without flattening
+ * first, every `diagram.png` in the book becomes `diagram-<hash>.png` — still
+ * unique, but anonymous. Measured. That matters because galley hands the reader
+ * the generated `.tex`: a `\includegraphics{chapters-03-illusion-diagram-...}`
+ * says where the figure came from, and `diagram-...` does not.
  */
 export function figureName(relativePath: string): string {
   const flattened = relativePath.replace(/[\\/]+/g, '-')

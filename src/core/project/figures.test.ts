@@ -14,6 +14,16 @@ describe('figureName', () => {
     expect(figureName(`${prefix}/one.png`)).not.toBe(figureName(`${prefix}/two.png`))
   })
 
+  // Pins the flatten step, which nothing else does: removing it still yields
+  // unique names (the fingerprint alone separates them), so only legibility
+  // catches the regression.
+  it('carries the directory into the name, not just the filename', () => {
+    const name = figureName('chapters/03-illusion/diagram.png')
+    expect(name).toContain('chapters')
+    expect(name).toContain('03-illusion')
+    expect(name).toContain('diagram')
+  })
+
   it('is deterministic', () => {
     expect(figureName('ch1/diagram.png')).toBe(figureName('ch1/diagram.png'))
   })
