@@ -45,4 +45,18 @@ describe('readPartSpec', () => {
   it('is not malformed merely for omitting fields', () => {
     expect(readPartSpec({ galley: {} }).malformed).toBe(false)
   })
+
+  // The early-return guard is what makes readPartSpec total. Every case above
+  // passes a `galley` key, so without this the guard is exercised only through
+  // isPart — deleting it would let readPartSpec(null) throw and make a note
+  // report malformed: true, and nothing would fail.
+  it('is total for a file that is not in the book', () => {
+    const defaults = {
+      spec: { role: 'main', numbered: true, listed: true },
+      malformed: false,
+    }
+    expect(readPartSpec(null)).toEqual(defaults)
+    expect(readPartSpec({ title: 'Research' })).toEqual(defaults)
+    expect(readPartSpec({})).toEqual(defaults)
+  })
 })
