@@ -177,6 +177,18 @@ describe('buildPreamble', () => {
         'secnumdepth',
       )
     })
+
+    // Re-review Fix 5: secnumdepth has nothing to do with the contents page —
+    // it fires independently of toc.include — so it gets its own header
+    // rather than being filed under "Contents", where a reader downloading
+    // the .tex would find a numbering switch under a heading that misnames it.
+    it('files secnumdepth under its own header, not Contents (re-review Fix 5)', () => {
+      const out = buildPreamble(
+        cfg({ sections: { numbered: false }, toc: { include: false, depth: 2 } }),
+      )
+      expect(out).toContain('% ---- Section numbering ----')
+      expect(out).not.toContain('% ---- Contents ----')
+    })
   })
 
   it('is written for a human reader: commented and not run together', () => {

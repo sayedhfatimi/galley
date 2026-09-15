@@ -481,8 +481,10 @@ describe('part structure', () => {
   it('emits the short/long chapter form for a numbered part with a tocTitle (Fix 3)', () => {
     const source =
       '---\nstructure:\n  "Cost & Value": { toc_title: "100% Off" }\n---\n\n# Cost & Value\n'
-    // Both arguments are LaTeX arguments and are escaped independently.
-    expect(book(source)).toBe('\\chapter[100\\% Off]{Cost \\& Value}')
+    // Both arguments are LaTeX arguments and are escaped independently. The
+    // optional argument carries its own brace guard — see the re-review
+    // Fix 1 test below — which is inert here since the title has no ']'.
+    expect(book(source)).toBe('\\chapter[{100\\% Off}]{Cost \\& Value}')
   })
 
   // ---- Fix 4: listed:false on a numbered part cannot be honoured ----
@@ -546,5 +548,84 @@ describe('part structure', () => {
     const out = book(source, { toc: { include: false, depth: 2 } })
     expect(out).toContain('\\chapter*{Dedication}')
     expect(out).not.toContain('\\addcontentsline')
+  })
+
+  // ---- Re-review Fix 1: a ']' in a short title tears the chapter apart ----
+
+  it('guards a short title containing "]" in braces so it cannot close the optional argument early (Fix 1)', () => {
+    const source =
+      '---\nstructure:\n  "Notes on Method": { toc_title: "Notes [Revised]" }\n---\n\n# Notes on Method\n'
+    // Unguarded, \@chapter's optional-argument scanner would read up to the
+    // FIRST ']' — the one inside the title — leaving "Notes on Method" typeset
+    // as the chapter's opening paragraph rather than its heading. The [{...}]
+    // guard keeps the whole bracketed title inside one brace group, so the
+    // scanner only sees the outer ']'.
+    expect(book(source)).toBe('\\chapter[{Notes [Revised]}]{Notes on Method}')
+  })
+
+  // ---- Re-review Fix 2: main -> front -> main must not double \mainmatter ----
+
+  it('latches #openRole only when a transition actually opens a division (Fix 2)', () => {
+    // The regression: `front` returned '' but still set #openRole = 'front',
+    // so the SECOND `main` part looked like a role change and re-emitted
+    // \mainmatter, calling \pagenumbering{arabic} a second time and
+    // restarting the page counter mid-book.
+    const source =
+      '---\nstructure:\n  Chapter One: { role: main }\n  Preface: { role: front }\n  Chapter Two: { role: main }\n---\n\n# Chapter One\n\n# Preface\n\n# Chapter Two\n'
+    const body = tex(source, { character: 'book' })
+    expect(body.match(/\\mainmatter/g)?.length).toBe(1)
+    expect(body).toContain('\\chapter{Chapter One}')
+    expect(body).toContain('\\chapter*{Preface}')
+    expect(body).toContain('\\chapter{Chapter Two}')
+  })
+
+  it('opens front, main and back exactly once each in document order (Fix 2)', () => {
+    const source =
+      '---\nstructure:\n  Notes: { role: front }\n  Afterword: { role: back }\n---\n\n# Notes\n\n# Chapter One\n\n# Afterword\n'
+    const body = tex(source, { character: 'book' })
+    expect(body.match(/\\mainmatter/g)?.length).toBe(1)
+    expect(body.match(/\\backmatter/g)?.length).toBe(1)
+  })
+
+  it('still opens back then main exactly once each, per the previous fix (Fix 2)', () => {
+    const source =
+      '---\nstructure:\n  Afterword: { role: back }\n  Chapter One: { role: main }\n---\n\n# Afterword\n\n# Chapter One\n'
+    const body = tex(source, { character: 'book' })
+    expect(body.match(/\\backmatter/g)?.length).toBe(1)
+    expect(body.match(/\\mainmatter/g)?.length).toBe(1)
+  })
+
+  // ---- Re-review Fix 3: a duplicated heading must not ALSO raise a false structure-order ----
+
+  it('suppresses structure-order on a duplicated title, which is not out of order (Fix 3)', () => {
+    // Notes (front), Chapter One (main), Notes (shares the first Notes's
+    // front PartSpec by text) — correctly ordered from the writer's point of
+    // view, but the repeated "Notes" looks like a front part written after a
+    // main one unless the duplicate is accounted for.
+    const source =
+      '---\nstructure:\n  Notes: { role: front }\n---\n\n# Notes\n\n# Chapter One\n\n# Notes\n'
+    const found = diags(source, { character: 'book' })
+    expect(found.some((d) => d.kind === 'structure-duplicate-heading')).toBe(true)
+    expect(found.some((d) => d.kind === 'structure-order')).toBe(false)
+  })
+
+  // ---- Re-review Fix 4: the unlistable/unmatched notices say "heading", not "chapter" ----
+
+  it('calls it a heading, not a chapter, in an Article (Fix 4)', () => {
+    const source = '---\nstructure:\n  Preface: { listed: false }\n---\n\n# Preface\n'
+    const found = diags(source, { character: 'article' }).find(
+      (d) => d.kind === 'structure-unlistable',
+    )
+    expect(found?.message).toContain('numbered heading always appears')
+    expect(found?.message).not.toContain('chapter')
+  })
+
+  it('calls it a heading, not a chapter heading, in structure-unmatched (Fix 4)', () => {
+    const source = '---\nstructure:\n  Dedicaton: { role: front }\n---\n\n# Dedication\n'
+    const found = diags(source, { character: 'book' }).find(
+      (d) => d.kind === 'structure-unmatched',
+    )
+    expect(found?.message).toContain('matches any heading')
+    expect(found?.message).not.toContain('chapter')
   })
 })

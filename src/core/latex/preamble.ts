@@ -215,9 +215,8 @@ export function buildPreamble(config: GalleyConfig): string {
     ...runningHeads(config.character, config.twoSided),
   )
 
-  const contentsLines: string[] = []
   if (config.toc.include) {
-    contentsLines.push(`\\setcounter{tocdepth}{${config.toc.depth}}`)
+    push('', '% ---- Contents ----', `\\setcounter{tocdepth}{${config.toc.depth}}`)
   }
   if (!config.sections.numbered) {
     // secnumdepth, not a starred command, is the lever for "sections
@@ -228,10 +227,12 @@ export function buildPreamble(config: GalleyConfig): string {
     // (it is all-or-nothing per call site) and a starred command writes
     // nothing to the .toc, silently overriding toc.depth above; secnumdepth
     // leaves the contents entry alone.
-    contentsLines.push('\\setcounter{secnumdepth}{0}')
-  }
-  if (contentsLines.length > 0) {
-    push('', '% ---- Contents ----', ...contentsLines)
+    //
+    // Its own header, not folded into "Contents" above: this switch has
+    // nothing to do with the contents page — it fires with toc.include false
+    // just as readily — and a reader who downloads the .tex would otherwise
+    // find a numbering switch filed under a heading that misnames it.
+    push('', '% ---- Section numbering ----', '\\setcounter{secnumdepth}{0}')
   }
 
   const title = titleBlock(config)

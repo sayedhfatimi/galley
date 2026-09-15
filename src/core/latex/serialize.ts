@@ -133,6 +133,15 @@ class Serializer {
   /** The division currently open, so a transition is emitted only on change. */
   #openRole: PartRole | null = null
   #ownsMatterDivisions = false
+  /**
+   * Heading text shared by two or more root headings (see the comment where
+   * this is populated). `#matterTransition` uses it to suppress a
+   * `structure-order` notice on a duplicated title: the role it would name
+   * came from whichever PartSpec matched by text, not from the writer's
+   * intent for THIS occurrence, so the notice would be actively misleading —
+   * `structure-duplicate-heading` already names the real cause.
+   */
+  #duplicatedTitles: ReadonlySet<string> = new Set()
 
   constructor(config: GalleyConfig, available?: ReadonlySet<string>) {
     this.#config = config
@@ -188,12 +197,13 @@ class Serializer {
         title,
       )
     }
+    this.#duplicatedTitles = duplicated
 
     for (const [key, spec] of this.#structure) {
       if (!titles.has(key)) {
         this.#diagnostics.add(
           'structure-unmatched',
-          'A part named in the document setup no longer matches any chapter heading, so it was set as main matter. Renaming a heading loses its setting.',
+          'A part named in the document setup no longer matches any heading, so it was set as main matter. Renaming a heading loses its setting.',
           key,
         )
         continue
@@ -202,10 +212,13 @@ class Serializer {
       // calls \addcontentsline itself, unconditionally. There is no way to keep
       // a numbered chapter out of the contents, so accepting the setting would
       // be an inert control — silently doing nothing rather than saying so.
+      // Worded as "heading" rather than "chapter": the same sectioning-depth
+      // mapping applies in Article and Report, where a part is a \section, not
+      // a \chapter.
       if (spec.numbered && !spec.listed) {
         this.#diagnostics.add(
           'structure-unlistable',
-          'A numbered chapter always appears in the contents. To leave it out, make the chapter unnumbered too.',
+          'A numbered heading always appears in the contents. To leave it out, make the heading unnumbered too.',
           key,
         )
       }
@@ -326,14 +339,23 @@ class Serializer {
     if (!this.#parts.has(node)) return `\\${command}{${text}}`
 
     const part = this.#partFor(node)
-    const transition = this.#matterTransition(part.role)
+    const title = headingText(node)
+    const transition = this.#matterTransition(part.role, title)
 
     if (part.numbered) {
       // book.cls:359-360: \chapter's optional argument is exactly the
       // short-title mechanism, so a numbered part with a tocTitle gets a
       // short contents entry for free. Without one this is the plain form,
       // byte-for-byte what v2.0.0 produced.
-      const short = part.tocTitle ? `[${escapeText(part.tocTitle)}]` : ''
+      //
+      // The optional argument is wrapped in its own braces — [{...}] — which
+      // is the standard LaTeX guard: \@chapter's optional-argument scanner
+      // reads up to the first BRACE-LEVEL ']', so an unguarded short title
+      // containing ']' (escapeText deliberately leaves ']' unescaped — see
+      // escape.ts) would close the argument early and spill the rest of the
+      // short title, and the chapter title after it, into the document as
+      // running text. The extra grouping is inert for a plain title.
+      const short = part.tocTitle ? `[{${escapeText(part.tocTitle)}}]` : ''
       return `${transition}\\${command}${short}{${text}}`
     }
 
@@ -343,7 +365,7 @@ class Serializer {
     // in a table of contents. Suppressed entirely when the document has no
     // contents page to receive it — a hand-written line that does nothing is
     // noise in a .tex the reader edits.
-    const entry = part.tocTitle ?? headingText(node)
+    const entry = part.tocTitle ?? title
     const listing =
       part.listed && this.#config.toc.include
         ? `\n\\addcontentsline{toc}{${command}}{${escapeText(entry)}}`
@@ -359,11 +381,16 @@ class Serializer {
    * alongside \maketitle and the contents, because those belong to the front
    * matter too.
    */
-  #matterTransition(role: PartRole): string {
+  #matterTransition(role: PartRole, title: string): string {
     if (!this.#ownsMatterDivisions) return ''
 
     const rank = roleRank(role)
-    if (rank < this.#highestRank) {
+    // A duplicated title's inherited role is not the writer's intent for THIS
+    // occurrence — see the field comment on #duplicatedTitles — and
+    // `structure-duplicate-heading` already names the real cause, so raising
+    // `structure-order` on top of it would be a second, flatly false notice
+    // about a book that (from the writer's point of view) is in order.
+    if (rank < this.#highestRank && !this.#duplicatedTitles.has(title)) {
       // Still emit the transition below — book.cls's \backmatter runs
       // \@mainmatterfalse WITHOUT restoring \pagenumbering{arabic}, so
       // returning '' here (the old behaviour) left every part written after
@@ -383,10 +410,19 @@ class Serializer {
     this.#highestRank = Math.max(this.#highestRank, rank)
 
     if (role === this.#openRole) return ''
+
+    // \frontmatter is not this method's to emit — document.ts owns it (see
+    // the class comment above) — so a `front` role has no command here at
+    // all. Crucially, #openRole must NOT latch to 'front' in that case: doing
+    // so was the regression this guards against. A latched 'front' makes the
+    // NEXT `main` part look like a role change and re-emit \mainmatter,
+    // which calls \pagenumbering{arabic} a second time and restarts the page
+    // counter mid-book. Leaving #openRole untouched means only a role that
+    // actually opens a division can close one off.
+    if (role === 'front') return ''
+
     this.#openRole = role
-    if (role === 'main') return '\\mainmatter\n\n'
-    if (role === 'back') return '\\backmatter\n\n'
-    return ''
+    return role === 'main' ? '\\mainmatter\n\n' : '\\backmatter\n\n'
   }
 
   #list(node: List): string {
