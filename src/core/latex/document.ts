@@ -8,7 +8,7 @@
  * diagnostic rather than an exception.
  */
 
-import type { GalleyConfig, Metadata } from '../config'
+import { type GalleyConfig, type Metadata, usesMatter } from '../config'
 import type { Diagnostic } from '../diagnostics'
 import { extractFrontmatter, hasFrontmatter } from '../markdown/frontmatter'
 import { parseMarkdown } from '../markdown/parse'
@@ -62,7 +62,7 @@ export function convert(
   // again at arabic 1, which is what makes the front of it read as a printed
   // book rather than as page one of a long article. Only the book class
   // defines these; report and article do not.
-  const matter = config.character === 'book'
+  const matter = usesMatter(config.character)
 
   const parts = [buildPreamble(config), '', '\\begin{document}', '']
   if (matter) parts.push('\\frontmatter', '')

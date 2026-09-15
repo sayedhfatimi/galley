@@ -21,7 +21,13 @@ import type {
   RootContent,
   Table,
 } from 'mdast'
-import { type DocumentCharacter, type GalleyConfig, usesChapters } from '../config'
+import {
+  characterLabel,
+  type DocumentCharacter,
+  type GalleyConfig,
+  usesChapters,
+  usesMatter,
+} from '../config'
 import { type Diagnostic, DiagnosticCollector } from '../diagnostics'
 import { findScriptGaps, typefaceOrDefault, typefacesWithGreek } from '../fonts'
 import { classifyImage, SUPPORTED_IMAGE_LIST } from '../images'
@@ -233,7 +239,7 @@ class Serializer {
     )
     if (!divided) return
 
-    if (this.#config.character === 'book') {
+    if (usesMatter(this.#config.character)) {
       this.#ownsMatterDivisions = true
       return
     }
@@ -241,10 +247,18 @@ class Serializer {
     // \frontmatter, \mainmatter and \backmatter are book-class commands. Saying
     // nothing here would be an inert control: the reader sets front matter, the
     // document class discards it, and nothing explains why.
+    //
+    // Deliberately silent on numbering: a part can still be numbered here (an
+    // Article's `{ role: back, numbered: true }` emits a numbered
+    // `\section`), so a message claiming the parts were "set unnumbered"
+    // would be false whenever the writer asked for numbering. The one claim
+    // that is true regardless is that the division itself — and the roman/
+    // arabic page-numbering restart that comes with it — does not exist
+    // outside a Book.
     this.#diagnostics.add(
       'structure-ignored',
-      'Front and back matter exist only in a Book. The parts were set unnumbered as asked, but the page numbering does not restart.',
-      this.#config.character,
+      `Front and back matter exist only in a Book, so the page numbering does not restart in a ${characterLabel(this.#config.character)}.`,
+      characterLabel(this.#config.character),
     )
   }
 

@@ -112,6 +112,33 @@ export function usesChapters(character: DocumentCharacter): boolean {
   return character === 'book' || character === 'report'
 }
 
+/**
+ * Does this character have front/main/back matter divisions at all?
+ *
+ * `document.ts` (whether to emit `\frontmatter`/`\mainmatter`) and
+ * `serialize.ts` (whether to honour a `structure:` block's roles, or raise
+ * `structure-ignored` instead) each ask this same question independently of
+ * the LaTeX class. They must never disagree — if one says yes and the other
+ * no, one file emits `\frontmatter` while the other raises a diagnostic
+ * claiming the class has no front matter, in the same document. One helper,
+ * called from both, makes that impossible rather than merely unlikely.
+ */
+export function usesMatter(character: DocumentCharacter): boolean {
+  return character === 'book'
+}
+
+/** The reader-facing name for a character, matching the Configure dialog. */
+export function characterLabel(character: DocumentCharacter): string {
+  switch (character) {
+    case 'book':
+      return 'Book'
+    case 'report':
+      return 'Report'
+    default:
+      return 'Article'
+  }
+}
+
 /** The LaTeX document class for a character. */
 export function documentClass(character: DocumentCharacter): string {
   return character

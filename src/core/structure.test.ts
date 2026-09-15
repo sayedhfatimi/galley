@@ -156,6 +156,29 @@ describe('writeStructure', () => {
     expect(out).toContain('title: T')
   })
 
+  it('drops the fence pair entirely when the structure block was the only content', () => {
+    const source = '---\nstructure:\n  A: { role: front }\n---\n\n# A\n'
+    expect(writeStructure(source, map([]))).toBe('# A\n')
+  })
+
+  // Fix 4: emptying the block left a literal `{}` behind for a writer whose
+  // frontmatter was only ever a comment. `yaml === '{}'` only caught the
+  // case where the WHOLE stringified document was `{}`; a leading comment
+  // means the empty map's `{}` is not the whole string, so the old guard
+  // missed it. Reproduction: flip a heading to Front matter and back to
+  // Main, on a document whose only frontmatter is a comment.
+  it('does not leave a stray {} when the only frontmatter is a comment (Fix 4)', () => {
+    const original = '---\n# a comment\n---\n\n# Alpha\n'
+    const withPart = writeStructure(
+      original,
+      map([['Alpha', { role: 'front', numbered: false, listed: true }]]),
+    )
+    const reverted = writeStructure(withPart, map([]))
+    expect(reverted).not.toContain('{}')
+    expect(reverted).toContain('# a comment')
+    expect(reverted).toContain('# Alpha')
+  })
+
   it('leaves a document with no frontmatter alone when there is nothing to write', () => {
     expect(writeStructure('# A\n', map([]))).toBe('# A\n')
   })

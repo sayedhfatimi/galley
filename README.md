@@ -121,7 +121,8 @@ structure:
 
 Each entry sets a **role** — `front`, `main` or `back` — plus two independent switches.
 **Front and back matter are unnumbered by default**, because that is what the division
-means; main matter is numbered. Either can be overridden. A part can be kept **out of the
+means; main matter is numbered. Either can be overridden with `numbered:` — a numbered
+appendix, for instance, is `{ role: back, numbered: true }`. A part can be kept **out of the
 contents** with `listed: false`, which is how the Copyright page above is handled.
 `toc_title` gives a **shorter contents entry** than the heading, which is how a long chapter
 title is kept readable on the contents page — it works on numbered chapters too. Anything
@@ -131,8 +132,11 @@ structure is completely unchanged.
 **Front and back matter exist only in a Book.** Ask for them in an Article or Report and
 galley says so rather than silently ignoring it.
 
-**The Structure section of the Configure dialog writes this block for you**, so nobody has
-to type YAML. It lists the document's own headings, so the two cannot drift apart.
+**The Structure section of the Configure dialog writes this block for you** for the
+headings it can see, so nobody has to type YAML for the ordinary case. It lists the
+document's own headings, so the two cannot drift apart — but renaming a heading leaves its
+old entry behind in the frontmatter, unlisted and unremovable from the dialog; clear it in
+source view.
 
 **galley tells you when it cannot do what the block asks.** A part named here that no
 longer matches a heading loses its setting — renaming a heading does that — and galley says

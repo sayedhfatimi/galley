@@ -17,7 +17,7 @@
 
 import type { Heading, Nodes } from 'mdast'
 import { Document, isMap, parseDocument } from 'yaml'
-import { splitFrontmatter } from './markdown/split'
+import { joinFrontmatter, splitFrontmatter } from './markdown/split'
 
 export type PartRole = 'front' | 'main' | 'back'
 
@@ -31,10 +31,45 @@ export interface PartSpec {
   tocTitle?: string
 }
 
-/** What a heading is when the document says nothing about it. */
-export const DEFAULT_PART: PartSpec = { role: 'main', numbered: true, listed: true }
-
 const ROLES: readonly PartRole[] = ['front', 'main', 'back']
+
+/**
+ * Apply role defaults to one raw entry. An explicit field always wins.
+ *
+ * NOTE: `src/ui/ConfigPanel.tsx`'s `defaultChanged`/`merged.numbered` logic
+ * re-derives this same "unnumbered unless main" rule by its own means, for
+ * the UI's edit-in-place case (changing an existing part's role without
+ * clobbering a deliberate override). That duplication is a known, accepted
+ * layering concern — see Fix 2 of the book-structure branch review — but it
+ * means a change to the rule here must be carried over there by hand.
+ */
+function resolvePart(raw: Record<string, unknown>): PartSpec {
+  const declared = raw.role
+  const role: PartRole =
+    typeof declared === 'string' && (ROLES as readonly string[]).includes(declared)
+      ? (declared as PartRole)
+      : 'main'
+
+  // Front and back matter are unnumbered because that is what the division
+  // means; main matter is numbered. Either can be overridden outright.
+  const numbered = typeof raw.numbered === 'boolean' ? raw.numbered : role === 'main'
+  const listed = typeof raw.listed === 'boolean' ? raw.listed : true
+
+  const title = raw.toc_title
+  const tocTitle = typeof title === 'string' && title.trim() ? title.trim() : undefined
+
+  return tocTitle === undefined
+    ? { role, numbered, listed }
+    : { role, numbered, listed, tocTitle }
+}
+
+/**
+ * What a heading is when the document says nothing about it. Derived from
+ * `resolvePart({})` — an empty raw entry — rather than hand-written, so this
+ * and `resolvePart`'s own defaulting can never drift apart the way the two
+ * once could when each spelled `role === 'main'` separately.
+ */
+export const DEFAULT_PART: PartSpec = resolvePart({})
 
 /**
  * The plain text of a heading, for matching against a `structure:` key and for
@@ -59,27 +94,6 @@ export function headingText(node: Heading): string {
   }
   visit(node)
   return out.trim()
-}
-
-/** Apply role defaults to one raw entry. An explicit field always wins. */
-function resolvePart(raw: Record<string, unknown>): PartSpec {
-  const declared = raw.role
-  const role: PartRole =
-    typeof declared === 'string' && (ROLES as readonly string[]).includes(declared)
-      ? (declared as PartRole)
-      : 'main'
-
-  // Front and back matter are unnumbered because that is what the division
-  // means; main matter is numbered. Either can be overridden outright.
-  const numbered = typeof raw.numbered === 'boolean' ? raw.numbered : role === 'main'
-  const listed = typeof raw.listed === 'boolean' ? raw.listed : true
-
-  const title = raw.toc_title
-  const tocTitle = typeof title === 'string' && title.trim() ? title.trim() : undefined
-
-  return tocTitle === undefined
-    ? { role, numbered, listed }
-    : { role, numbered, listed, tocTitle }
 }
 
 /**
@@ -224,12 +238,33 @@ export function writeStructure(source: string, structure: Map<string, PartSpec>)
     if (structure.size === 0) doc.delete('structure')
     else doc.set('structure', block)
 
-    const yaml = doc.toString().trimEnd()
+    // Whether anything is left worth a fence pair, judged by `doc.contents`
+    // itself — null before any key exists, or an emptied map once the last
+    // key is removed — NOT by string-comparing the stringified output. The
+    // old comparison (`yaml === '' || yaml === '{}'`) only ever matched a
+    // frontmatter with nothing else in it. A frontmatter that was only ever
+    // a comment ALSO parses to `contents === null`, but deleting the last
+    // real key from it leaves an empty map rather than reverting to null, so
+    // `doc.toString()` for THAT case is neither `''` nor `'{}'` — it is the
+    // comment followed by an empty map. The old check missed it, and the
+    // empty map's own `{}` went out in the writer's manuscript alongside
+    // their comment.
+    const empty =
+      doc.contents === null || (isMap(doc.contents) && doc.contents.items.length === 0)
 
-    // An emptied block can leave nothing behind; a bare fence pair is noise.
-    // `parseDocument('').toString()` is '{}', so both forms have to be caught.
-    if (yaml === '' || yaml === '{}') return body
-    return `---\n${yaml}\n---\n\n${body}`
+    let yaml = doc.toString().trimEnd()
+    if (empty) {
+      // `yaml` itself does not round-trip a content-free document cleanly:
+      // an empty map stringifies as a literal `{}`, contents of `null` as a
+      // literal `null` — neither of which the writer typed. Strip only that
+      // trailing token; anything before it, such as a comment, is the
+      // writer's own and must stay (see the reproduction in
+      // structure.test.ts, where the comment survives but the `{}` must not).
+      yaml = yaml.replace(/\n*(?:\{\}|null)$/, '').trimEnd()
+    }
+
+    if (yaml === '') return body
+    return joinFrontmatter(yaml, body)
   } catch {
     // Backstop only — see `parseWritableFrontmatter`'s docstring. Any future
     // `yaml` edge case the checks there did not anticipate falls back to the
