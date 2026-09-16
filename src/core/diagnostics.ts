@@ -32,6 +32,10 @@ export type DiagnosticKind =
   | 'project-part-malformed'
   /** `book.md` carried a `galley:` block, which does nothing there. */
   | 'project-book-not-a-part'
+  /** A file in the book has no top-level heading, so it opens no chapter. */
+  | 'project-part-headingless'
+  /** A file in the book has more than one top-level heading. */
+  | 'project-part-multiple-headings'
 
 export interface Diagnostic {
   kind: DiagnosticKind

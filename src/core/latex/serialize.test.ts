@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_CONFIG, type GalleyConfig } from '../config'
+import { DEFAULT_CONFIG, type GalleyConfig, presetFor } from '../config'
 import { parseMarkdown } from '../markdown/parse'
-import { serializeToLatex } from './serialize'
+import { type SerializePart, serializeParts, serializeToLatex } from './serialize'
 
 const tex = (md: string, over: Partial<GalleyConfig> = {}): string =>
   serializeToLatex(parseMarkdown(md), { ...DEFAULT_CONFIG, ...over }).body
@@ -627,5 +627,140 @@ describe('part structure', () => {
     )
     expect(found?.message).toContain('matches any heading')
     expect(found?.message).not.toContain('chapter')
+  })
+})
+
+describe('serializeParts', () => {
+  const book = presetFor('book')
+  const part = (source: string, role: 'front' | 'main' | 'back') => ({
+    tree: parseMarkdown(source),
+    spec: { role, numbered: role === 'main', listed: true },
+    path: `${role}.md`,
+  })
+
+  it('emits each matter division exactly once across many files', () => {
+    const result = serializeParts(
+      [
+        part('# Copyright\n', 'front'),
+        part('# Dedication\n', 'front'),
+        part('# Chapter One\n', 'main'),
+        part('# Chapter Two\n', 'main'),
+        part('# About\n', 'back'),
+      ],
+      book,
+    )
+    expect(result.body.match(/\\mainmatter/g)).toHaveLength(1)
+    expect(result.body.match(/\\backmatter/g)).toHaveLength(1)
+    expect(result.ownsMatterDivisions).toBe(true)
+    expect(result.body.indexOf('\\mainmatter')).toBeLessThan(
+      result.body.indexOf('Chapter One'),
+    )
+  })
+
+  it('applies each file’s own spec, not a heading-text lookup', () => {
+    const result = serializeParts(
+      [part('# Same Title\n', 'front'), part('# Same Title\n', 'main')],
+      book,
+    )
+    // Front matter is unnumbered, main matter numbered: two headings with
+    // identical text no longer share one setting.
+    expect(result.body).toContain('\\chapter*{Same Title}')
+    expect(result.body).toContain('\\chapter{Same Title}')
+    expect(result.diagnostics.map((d) => d.kind)).not.toContain(
+      'structure-duplicate-heading',
+    )
+  })
+
+  /**
+   * Parts built by cutting ONE parsed tree at its root headings.
+   *
+   * Deliberately NOT one `parseMarkdown` per part. A reference is resolved by
+   * the PARSER, not by this serializer: micromark only emits a
+   * `linkReference`/`footnoteReference` node for an identifier that is defined
+   * in the same source, and an undefined one stays plain text (pinned by the
+   * test below). So parsing per file produces parts that contain no reference
+   * node at all, and a cross-file assertion over them would pass for a
+   * serializer that never collected anything. Cutting one tree hands the
+   * serializer the input this behaviour is actually about: a reference in one
+   * part whose definition lives in another.
+   */
+  const cutAtChapters = (source: string): SerializePart[] => {
+    const cut: SerializePart[] = []
+    for (const node of parseMarkdown(source).children) {
+      if (node.type === 'heading' && node.depth === 1) {
+        cut.push({ tree: { type: 'root', children: [] }, path: `${cut.length}.md` })
+      }
+      cut.at(-1)?.tree.children.push(node)
+    }
+    return cut
+  }
+
+  it('collects link and footnote definitions across files', () => {
+    // Catches collecting definitions per part DURING the walk rather than over
+    // every part before it: the reference in the first part is then serialized
+    // before the second part's definitions are known, and both fall back to
+    // their bare text.
+    const result = serializeParts(
+      cutAtChapters(
+        '# One\n\nSee [the site][ref].[^a]\n\n# Two\n\n[ref]: https://example.com\n\n[^a]: The note.\n',
+      ),
+      book,
+    )
+    expect(result.body).toContain('\\href{https://example.com}{the site}')
+    expect(result.body).toContain('\\footnote{The note.}')
+  })
+
+  it('cannot resolve a reference across separately PARSED files', () => {
+    // A known limitation of the stage before this one, pinned so the test
+    // above is not mistaken for proof that the product resolves references
+    // across chapters. It does not: a project parses each file on its own, and
+    // micromark leaves an undefined reference as plain text, so no reference
+    // node ever reaches the serializer. Closing this needs a change at the
+    // PARSE stage (project-wide definitions made visible to every file), not
+    // here. Delete this test when that lands.
+    const result = serializeParts(
+      [
+        { tree: parseMarkdown('# One\n\nSee [the site][ref].\n'), path: 'a.md' },
+        { tree: parseMarkdown('# Two\n\n[ref]: https://example.com\n'), path: 'b.md' },
+      ],
+      book,
+    )
+    expect(result.body).not.toContain('\\href')
+    expect(result.body).toContain('See [the site][ref].')
+  })
+
+  it('diagnoses a part with no top-level heading', () => {
+    const result = serializeParts(
+      [
+        {
+          tree: parseMarkdown('Just prose.\n'),
+          spec: { role: 'main', numbered: true, listed: true },
+          path: 'orphan.md',
+        },
+      ],
+      book,
+    )
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ kind: 'project-part-headingless', file: 'orphan.md' }),
+    )
+  })
+
+  it('diagnoses a part with more than one top-level heading', () => {
+    const result = serializeParts(
+      [
+        {
+          tree: parseMarkdown('# One\n\n# Two\n'),
+          spec: { role: 'main', numbered: true, listed: true },
+          path: 'two.md',
+        },
+      ],
+      book,
+    )
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: 'project-part-multiple-headings',
+        file: 'two.md',
+      }),
+    )
   })
 })

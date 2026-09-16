@@ -126,7 +126,18 @@ class Serializer {
    * have no store to ask.
    */
   readonly #available: ReadonlySet<string> | undefined
+  /** Single-document mode only: the `structure:` block, keyed by heading text. */
   #structure: Map<string, PartSpec> = new Map()
+  /**
+   * The spec governing each root heading, by node identity.
+   *
+   * Keyed on the NODE rather than on its text so both modes share one lookup:
+   * a single document fills this from `structure:` by matching text, while a
+   * project fills it from each file's own `galley:` block. That is also what
+   * retires heading-text keying for projects — two files may hold identically
+   * titled chapters and be set differently.
+   */
+  #specByNode = new Map<Heading, PartSpec>()
   /**
    * Root-level depth-1 headings, by node identity. `#blockquote` calls
    * `#blocks` and `#listItem` calls `#block`, so a quoted or bulleted heading
@@ -155,11 +166,47 @@ class Serializer {
   }
 
   run(tree: Root): SerializeResult {
-    this.#collectDefinitions(tree)
-    this.#prepareStructure(tree)
-    const body = this.#blocks(tree.children)
+    return this.runParts([{ tree }])
+  }
+
+  /**
+   * Walk every part of a book through THIS instance.
+   *
+   * One instance rather than one per file, because the state that decides a
+   * book's divisions spans files: `#openRole` is what stops \mainmatter being
+   * emitted once per chapter, `#highestRank` is what notices a part written
+   * out of book order, and `#images`, `#definitions` and `#footnotes` are the
+   * book's, not any one file's.
+   */
+  runParts(parts: readonly SerializePart[]): SerializeResult {
+    // Definitions first, across EVERY part: a link or footnote defined in one
+    // chapter and referenced in another must resolve, exactly as it would if
+    // the book were one file.
+    for (const part of parts) this.#collectDefinitions(part.tree)
+
+    // A part WITHOUT a spec is a single document, governed by its own
+    // `structure:` block. Passing several of those at once is not a supported
+    // shape — `#structure` and `#duplicatedTitles` belong to one document and
+    // the last one read would win — and it cannot arise: a project part always
+    // carries the spec its `galley:` block resolved to (see project/types.ts),
+    // and a single document is always exactly one part.
+    for (const part of parts) {
+      if (part.spec) this.#prepareProjectPart(part.tree, part.spec, part.path ?? '')
+      else this.#prepareDocumentStructure(part.tree)
+    }
+
+    this.#resolveMatterOwnership()
+
+    // `#block` returns '' for a `yaml` node ("consumed elsewhere") and
+    // `#blocks` filters empty strings BEFORE joining, so N parts carrying N
+    // frontmatter blocks add no stray blank lines — a single document's body
+    // stays byte-for-byte what it was.
+    const bodies = parts
+      .map((part) => this.#blocks(part.tree.children))
+      .filter((b) => b.length > 0)
+
     return {
-      body,
+      body: bodies.join('\n\n'),
       diagnostics: this.#diagnostics.list(),
       images: [...this.#images],
       ownsMatterDivisions: this.#ownsMatterDivisions,
@@ -167,12 +214,82 @@ class Serializer {
   }
 
   /**
-   * Read the structure block and check it against the headings that exist.
+   * A project part: the FILE carries the spec, and its root headings inherit
+   * it. No heading-text lookup is involved, so two files may hold identically
+   * titled chapters and still be set apart.
+   */
+  #prepareProjectPart(tree: Root, spec: PartSpec, path: string): void {
+    const headings: Heading[] = []
+    for (const node of tree.children) {
+      if (node.type === 'heading' && node.depth === 1) headings.push(node)
+    }
+
+    if (headings.length === 0) {
+      this.#diagnostics.add(
+        'project-part-headingless',
+        'A file in the book has no top-level heading, so it opens no chapter of its own and its text continues the chapter before it. Give it a "# " heading.',
+        undefined,
+        path,
+      )
+    } else if (headings.length > 1) {
+      this.#diagnostics.add(
+        'project-part-multiple-headings',
+        'A file in the book has more than one top-level heading, so it becomes several chapters that share its settings. Split it, or demote the extra headings.',
+        undefined,
+        path,
+      )
+    }
+
+    for (const node of headings) {
+      this.#parts.add(node)
+      this.#specByNode.set(node, spec)
+    }
+  }
+
+  /**
+   * Whether the body opens its own \mainmatter/\backmatter.
+   *
+   * Decided once, over every part, AFTER all specs are known — a project's
+   * divisions span files, so no single file can answer this. Only specs that
+   * actually govern a heading count: an unmatched `structure:` entry does
+   * nothing, and counting it would make a document believe it owns divisions
+   * it then never emits.
+   */
+  #resolveMatterOwnership(): void {
+    const divided = [...this.#specByNode.values()].some((spec) => spec.role !== 'main')
+    if (!divided) return
+
+    if (usesMatter(this.#config.character)) {
+      this.#ownsMatterDivisions = true
+      return
+    }
+
+    // \frontmatter, \mainmatter and \backmatter are book-class commands. Saying
+    // nothing here would be an inert control: the reader sets front matter, the
+    // document class discards it, and nothing explains why.
+    //
+    // Deliberately silent on numbering: a part can still be numbered here (an
+    // Article's `{ role: back, numbered: true }` emits a numbered
+    // `\section`), so a message claiming the parts were "set unnumbered"
+    // would be false whenever the writer asked for numbering. The one claim
+    // that is true regardless is that the division itself — and the roman/
+    // arabic page-numbering restart that comes with it — does not exist
+    // outside a Book.
+    this.#diagnostics.add(
+      'structure-ignored',
+      `Front and back matter exist only in a Book, so the page numbering does not restart in a ${characterLabel(this.#config.character)}.`,
+      characterLabel(this.#config.character),
+    )
+  }
+
+  /**
+   * Read one document's structure block and check it against the headings that
+   * exist.
    *
    * A pre-pass rather than a check during the walk, because "this entry matches
    * nothing" is only knowable once every heading has been seen.
    */
-  #prepareStructure(tree: Root): void {
+  #prepareDocumentStructure(tree: Root): void {
     // Collected unconditionally — not just when a `structure:` block exists —
     // because this set is also what `#heading` uses to decide whether a
     // depth-1 node is a part at all. See the field comment.
@@ -230,41 +347,19 @@ class Serializer {
       }
     }
 
-    // Only entries that actually matched a heading can open a division — one
-    // `structure-unmatched` has just reported does nothing, so counting it
-    // here would make a document with no matching parts believe it owns its
-    // own \mainmatter/\backmatter and then never emit either.
-    const divided = [...this.#structure].some(
-      ([key, spec]) => titles.has(key) && spec.role !== 'main',
-    )
-    if (!divided) return
-
-    if (usesMatter(this.#config.character)) {
-      this.#ownsMatterDivisions = true
-      return
+    // Only entries that actually matched a heading govern anything — one
+    // `structure-unmatched` has just reported does nothing — and the node map
+    // is what carries that fact on to `#resolveMatterOwnership`, which is now
+    // the single place matter ownership is decided for both modes.
+    for (const node of this.#parts) {
+      const spec = this.#structure.get(headingText(node))
+      if (spec) this.#specByNode.set(node, spec)
     }
-
-    // \frontmatter, \mainmatter and \backmatter are book-class commands. Saying
-    // nothing here would be an inert control: the reader sets front matter, the
-    // document class discards it, and nothing explains why.
-    //
-    // Deliberately silent on numbering: a part can still be numbered here (an
-    // Article's `{ role: back, numbered: true }` emits a numbered
-    // `\section`), so a message claiming the parts were "set unnumbered"
-    // would be false whenever the writer asked for numbering. The one claim
-    // that is true regardless is that the division itself — and the roman/
-    // arabic page-numbering restart that comes with it — does not exist
-    // outside a Book.
-    this.#diagnostics.add(
-      'structure-ignored',
-      `Front and back matter exist only in a Book, so the page numbering does not restart in a ${characterLabel(this.#config.character)}.`,
-      characterLabel(this.#config.character),
-    )
   }
 
   /** The part settings for a top-level heading. */
   #partFor(node: Heading): PartSpec {
-    return this.#structure.get(headingText(node)) ?? DEFAULT_PART
+    return this.#specByNode.get(node) ?? DEFAULT_PART
   }
 
   /** Link and footnote definitions may appear anywhere, so gather them first. */
@@ -674,4 +769,27 @@ export function serializeToLatex(
   available?: ReadonlySet<string>,
 ): SerializeResult {
   return new Serializer(config, available).run(tree)
+}
+
+export interface SerializePart {
+  tree: Root
+  /**
+   * The file's own settings. Omit for single-document mode, where the
+   * `structure:` block in this tree's frontmatter governs instead.
+   */
+  spec?: PartSpec
+  /** Project-relative path, for diagnostics that must name a file. */
+  path?: string
+}
+
+/**
+ * Serialize many parts as ONE book, through one shared `Serializer` — see
+ * `runParts` for why the instance is shared.
+ */
+export function serializeParts(
+  parts: readonly SerializePart[],
+  config: GalleyConfig,
+  available?: ReadonlySet<string>,
+): SerializeResult {
+  return new Serializer(config, available).runParts(parts)
 }
