@@ -15,6 +15,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
+import { applyWikilinkEmbeds } from './wikilink'
 
 const processor = unified()
   .use(remarkParse)
@@ -30,5 +31,9 @@ const processor = unified()
  * to LaTeX cannot fail" true.
  */
 export function parseMarkdown(source: string): Root {
-  return processor.parse(source) as Root
+  const tree = processor.parse(source) as Root
+  // An explicit transform, not a `.use()` plugin: `.parse()` runs the parser
+  // only, so a plugin's transformer would never execute.
+  applyWikilinkEmbeds(tree)
+  return tree
 }
