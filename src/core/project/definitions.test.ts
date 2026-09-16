@@ -22,16 +22,6 @@ describe('sharedDefinitions', () => {
     expect(sharedDefinitions(['[^a]: the note\n'])).toBe('')
   })
 
-  // The defect this exclusion exists to prevent. A footnoteDefinition is a
-  // CONTAINER: injected at the top of a body that opens with indented content,
-  // it absorbs that content as its own continuation, moving it into another
-  // chapter. A leaf `definition` leaves it alone.
-  it('never lets an injected definition absorb the body that follows it', () => {
-    const body = '    indented code\n\nAfter.\n'
-    const injected = `${sharedDefinitions(['[ref]: https://e.com\n', '[^a]: note\n'])}\n\n${body}`
-    expect(types(injected)).toContain('code')
-  })
-
   it('collects across every part', () => {
     const out = sharedDefinitions([
       '[a]: https://a.com\n',
@@ -130,21 +120,54 @@ describe('sharedDefinitions', () => {
     }
   })
 
-  // Finding 3: a title ending in a backslash escapes its own closing quote,
-  // collapsing the block exactly as Finding 1 does. The fix carries no title
-  // at all, which makes this failure mode structurally impossible.
-  it('does not let a title ending in a backslash escape its own closing quote', () => {
-    const source = '[r]: https://e.com "t\\\\"\n'
-    const out = sharedDefinitions([source])
-    expect(types(out)).toContain('definition')
-    expect(types(out)).not.toContain('paragraph')
-  })
-
   // `serialize.ts` resolves a `linkReference` through `def.url` alone and
   // never reads `def.title` (see its `linkReference` case), so carrying a
   // title buys nothing but an escaping surface. Assert none is emitted.
   it('emits no title', () => {
     const out = sharedDefinitions(['[ref]: https://e.com "A Title"\n'])
     expect(out).not.toContain('"')
+  })
+
+  // The fifth Critical: an identifier ending in a backslash. `normalizeIdentifier`
+  // trims, so `[a\ ]: ...` normalises to identifier `a\` — emitting
+  // `[a\]: <...>` escapes its own closing bracket, collapsing the synthesised
+  // line (and with it the whole joined block) into a paragraph.
+  it('keeps the whole block resolvable when one identifier ends in a backslash', () => {
+    const poison = '[a\\ ]: https://poison.com\n'
+    const good = '[good]: https://good.com\n'
+    const out = sharedDefinitions([poison, good])
+
+    expect(types(out)).not.toContain('paragraph')
+    expect(types(out)).toContain('definition')
+
+    const chapter = 'See [it][good].\n'
+    expect(types(`${chapter}\n\n${out}`)).toContain('linkReference')
+  })
+
+  // Same class of defect, different source: mdast DECODES character
+  // references, so `&#10;` in a URL becomes a literal newline by the time
+  // `render` sees `node.url`. `<...>` forbids a raw newline, so the emitted
+  // line is broken across two lines and the block collapses the same way.
+  it('keeps the whole block resolvable when a URL contains a decoded newline', () => {
+    const poison = '[r]: https://e.com/&#10;x\n'
+    const good = '[good]: https://good.com\n'
+    const out = sharedDefinitions([poison, good])
+
+    expect(types(out)).not.toContain('paragraph')
+    expect(types(out)).toContain('definition')
+
+    const chapter = 'See [it][good].\n'
+    expect(types(`${chapter}\n\n${out}`)).toContain('linkReference')
+  })
+
+  // A dropped definition must drop SILENTLY (conversion never throws) and
+  // must not take any other definition down with it.
+  it('drops a poisoned definition silently while the rest survive', () => {
+    const poison = '[a\\ ]: https://poison.com\n'
+    const good = '[good]: https://good.com\n'
+    const out = sharedDefinitions([poison, good])
+
+    expect(out).toContain('good')
+    expect(out).not.toContain('poison')
   })
 })

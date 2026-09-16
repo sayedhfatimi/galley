@@ -30,13 +30,24 @@ export function sharedDefinitions(sources: readonly string[]): string {
       // `footnoteDefinition` is a CONTAINER, and injecting one absorbs any
       // following indented block as its own continuation — measured: a
       // chapter's code block vanished into another chapter's footnote.
-      if (node.type === 'definition') lines.push(render(node))
+      if (node.type === 'definition') {
+        const line = render(node)
+        if (line !== null) lines.push(line)
+      }
       if ('children' in node) for (const child of node.children) visit(child as Nodes)
     }
     visit(parseMarkdown(source))
   }
 
-  return lines.join('\n')
+  const block = lines.join('\n')
+  if (block === '') return ''
+
+  // Backstop for anything that only misbehaves once the lines sit together.
+  // Each line already round-tripped alone; if the block as a whole does not
+  // parse to definitions and nothing else, none of it is injected.
+  return parseMarkdown(block).children.every((child) => child.type === 'definition')
+    ? block
+    : ''
 }
 
 /**
@@ -52,7 +63,7 @@ export function sharedDefinitions(sources: readonly string[]): string {
  * Synthesising one line per definition makes that structurally impossible:
  * there is no continuation line to carry anything.
  */
-function render(node: Definition): string {
+function render(node: Definition): string | null {
   // `identifier`, NEVER `label`. Measured: `[a\]b]: url` parses to
   // identifier 'a\]b' but label 'a]b' — label is the DECODED text, so
   // re-emitting it drops the escape and the line stops being a definition.
@@ -68,5 +79,22 @@ function render(node: Definition): string {
   // No title. `serialize.ts` resolves a reference through `def.url` alone
   // (see its `linkReference` case) and never reads `def.title`, so carrying
   // one buys nothing but an escaping surface and the last multi-line case.
-  return `[${node.identifier}]: <${node.url.replace(/[\\<>]/g, '\\$&')}>`
+  const line = `[${node.identifier}]: <${node.url.replace(/[\\<>]/g, '\\$&')}>`
+
+  // CHECKED, NOT ARGUED. Five successive attempts to reason about which inputs
+  // are safe to emit were each wrong on an input nobody had thought of — an
+  // unterminated fence, a container definition, a blockquote marker carried out
+  // of a slice, a decoded label, an identifier ending in a backslash. The space
+  // of Markdown is too large for that argument to ever be complete.
+  //
+  // So the line is re-parsed and kept only if it round-trips to exactly the
+  // definition it was built from. An unbounded proof obligation becomes a
+  // closed check, and the worst case degrades to one unresolved cross-chapter
+  // link — the behaviour before this module existed — rather than a corrupted
+  // book.
+  const children = parseMarkdown(line).children
+  const only = children[0]
+  if (children.length !== 1 || only?.type !== 'definition') return null
+  if (only.identifier !== node.identifier || only.url !== node.url) return null
+  return line
 }
