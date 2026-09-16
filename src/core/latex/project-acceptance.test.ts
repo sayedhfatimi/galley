@@ -102,6 +102,88 @@ describe('a folder typesets identically to one document', () => {
     const project = readProject(shuffled, [])
     expect(project.parts.map((p) => p.path)).toEqual(CHAPTERS.map((c) => c.path))
   })
+
+  // The fixture above is zero-padded (01, 02, 03, 04, 99), so lexicographic
+  // and numeric sort agree on it and this assertion would pass even if
+  // `partOrder` dropped `numeric: true` from its collator. Two non-padded
+  // filenames whose digit count differs are what tells the two sorts apart:
+  // lexicographically '10-tenth.md' < '2-second.md' (the character '1' sorts
+  // before '2'), but numerically 2 < 10.
+  it('orders numeric filenames by value, not lexicographically', () => {
+    const files = [
+      {
+        path: '10-tenth.md',
+        source: '---\ngalley:\n  role: main\n---\n\n# Tenth\n\nTen.\n',
+      },
+      {
+        path: '2-second.md',
+        source: '---\ngalley:\n  role: main\n---\n\n# Second\n\nTwo.\n',
+      },
+    ]
+    const project = readProject(files, [])
+    expect(project.parts.map((p) => p.path)).toEqual(['2-second.md', '10-tenth.md'])
+  })
+})
+
+/**
+ * Equivalence (above) proves the folder path and the single-document path
+ * AGREE; it cannot prove either is RIGHT, and mutation testing showed exactly
+ * that gap — forcing `#resolveMatterOwnership` to return early breaks nothing
+ * in the equivalence test, because both sides of that comparison run the same
+ * (now-buggy) code and stay equal to each other. A bug in code shared by both
+ * paths is invisible to a test that only compares the two paths.
+ *
+ * These assertions are absolute instead: properties that must hold of the
+ * folder output on its own, regardless of what the single-document path does.
+ */
+describe('the folder output is structurally correct on its own', () => {
+  const project = readProject(folder(), [])
+  const tex = convertProject(project.parts, config()).tex
+
+  it('opens \\frontmatter exactly once, before the first front-matter heading', () => {
+    expect(tex.match(/\\frontmatter/g)).toHaveLength(1)
+    expect(tex.indexOf('\\frontmatter')).toBeLessThan(
+      tex.indexOf('\\chapter*{Copyright}'),
+    )
+  })
+
+  it('opens \\mainmatter exactly once, after the contents and before the first main-matter chapter', () => {
+    expect(tex.match(/\\mainmatter/g)).toHaveLength(1)
+    expect(tex.indexOf('\\tableofcontents')).toBeLessThan(tex.indexOf('\\mainmatter'))
+    expect(tex.indexOf('\\mainmatter')).toBeLessThan(
+      tex.indexOf('\\chapter{The Illusion of Truth}'),
+    )
+  })
+
+  it('opens \\backmatter exactly once, after the last main-matter chapter and before the back matter', () => {
+    expect(tex.match(/\\backmatter/g)).toHaveLength(1)
+    expect(tex.indexOf('\\chapter{The Illusion of Power}')).toBeLessThan(
+      tex.indexOf('\\backmatter'),
+    )
+    expect(tex.indexOf('\\backmatter')).toBeLessThan(
+      tex.indexOf("\\chapter*{Author's Note}"),
+    )
+  })
+
+  it('typesets every chapter in reading order', () => {
+    const positions = CHAPTERS.map((c) => {
+      const command =
+        c.role === 'main' ? `\\chapter{${c.heading}}` : `\\chapter*{${c.heading}}`
+      return tex.indexOf(command)
+    })
+
+    for (const position of positions) expect(position).toBeGreaterThan(-1)
+    for (let i = 1; i < positions.length; i++) {
+      expect(positions[i]).toBeGreaterThan(positions[i - 1])
+    }
+  })
+
+  it('leaves front matter unnumbered and numbers the first main-matter chapter', () => {
+    expect(tex).toContain('\\chapter*{Copyright}')
+    expect(tex).toContain('\\chapter*{Dedication}')
+    expect(tex).toMatch(/\\chapter(\[.*?\])?\{The Illusion of Truth\}/)
+    expect(tex).not.toContain('\\chapter*{The Illusion of Truth}')
+  })
 })
 
 describe('notes never reach the page', () => {
