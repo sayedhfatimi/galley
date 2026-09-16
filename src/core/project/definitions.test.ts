@@ -170,4 +170,16 @@ describe('sharedDefinitions', () => {
     expect(out).toContain('good')
     expect(out).not.toContain('poison')
   })
+
+  // The url comparison in render's round-trip gate is the one check nothing
+  // else pins. A URL containing an encoded entity decodes once at parse and
+  // would decode AGAIN when the synthesised line is re-parsed — silently
+  // retargeting the link. The gate must drop it rather than emit it.
+  it('drops a definition whose URL would not survive a round trip', () => {
+    const out = sharedDefinitions([
+      '[entity]: https://e.com/&amp;amp;x\n[good]: https://good.com\n',
+    ])
+    expect(out).toContain('[good]:')
+    expect(out).not.toContain('entity')
+  })
 })
