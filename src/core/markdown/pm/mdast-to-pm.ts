@@ -109,6 +109,27 @@ function blockToPm(node: RootContent): PMNode | null {
         ? { type: 'mathBlock', content: [{ type: 'text', text: tex }] }
         : { type: 'mathBlock' }
     }
+    // galley addition: a link definition is kept where the author put it.
+    //
+    // It is also resolved into `linkDefs` above, and a `[text][ref]` using it
+    // still normalises to inline form — that is accepted churn, and rich mode
+    // warns about it. What is NOT acceptable is what happened before: the
+    // definition itself hit `default: return null`, so a note holding nothing
+    // but a list of link definitions round-tripped to an EMPTY FILE, and a
+    // chapter's definitions vanished from under the cross-chapter links that
+    // `project/definitions.ts` exists to serve.
+    case 'definition': {
+      const def = node as Definition
+      return {
+        type: 'linkDefinition',
+        attrs: {
+          identifier: def.identifier,
+          label: def.label ?? def.identifier,
+          url: def.url,
+          title: def.title ?? null,
+        },
+      }
+    }
     // galley addition: raw HTML is carried, never dropped.
     //
     // `serialize.ts` already passes HTML through to the LaTeX as literal text

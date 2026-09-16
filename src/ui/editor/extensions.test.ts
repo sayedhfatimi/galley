@@ -42,6 +42,8 @@ describe('editor schema', () => {
     '###### A sixth-level heading',
     '<div class="x">hi</div>',
     'Text <u>underline</u> and <br> more',
+    '[ref]: https://example.com',
+    'A [reference][ref].\n\n[ref]: https://example.com/t',
   ])('accepts %j', (markdown) => {
     const doc = mdastToPm(parseMarkdown(markdown))
     expect(() => PMNode.fromJSON(schema, doc)).not.toThrow()

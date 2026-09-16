@@ -75,6 +75,8 @@ function blockFromPm(node: PMNode): BlockContent | null {
       return mathBlockFromPm(node)
     case 'htmlBlock':
       return htmlFromPm(node)
+    case 'linkDefinition':
+      return linkDefinitionFromPm(node)
     case 'image':
       return imageBlockFromPm(node)
     default:
@@ -90,6 +92,20 @@ function imageBlockFromPm(node: PMNode): BlockContent {
     type: 'paragraph',
     children: [imageFromPm(node)],
   } satisfies Paragraph
+}
+
+/** galley addition: a link definition, back where the author had it. */
+function linkDefinitionFromPm(node: PMNode): BlockContent {
+  const attr = (key: string): string | undefined =>
+    typeof node.attrs?.[key] === 'string' ? (node.attrs[key] as string) : undefined
+  const identifier = attr('identifier') ?? ''
+  return {
+    type: 'definition',
+    identifier,
+    label: attr('label') ?? identifier,
+    url: attr('url') ?? '',
+    title: attr('title') ?? null,
+  } as unknown as BlockContent
 }
 
 /**

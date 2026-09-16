@@ -61,6 +61,10 @@ describe('survives byte for byte', () => {
     ['inline raw HTML', 'Text <u>x</u> more\n'],
     ['a line-break tag', 'Text <br> more\n'],
     ['HTML wrapping real Markdown', '<div>\n\nmixed *md*\n\n</div>\n'],
+    // Link definitions. A note that is nothing but a list of them used to
+    // round-trip to an EMPTY FILE.
+    ['a bare link definition', '[ref]: https://example.com\n'],
+    ['several link definitions', '[a]: http://x.com "T"\n[b]: http://y.com\n'],
   ])('keeps %s', (_name, source) => {
     expect(roundTrip(source)).toBe(source)
   })
@@ -201,17 +205,6 @@ describe('destroys content (pinned until fixed)', () => {
   it.each([
     ['an inline image', 'Text ![](fig.png) more\n', 'Text  more\n'],
     ['an inline image with alt text', 'Text ![alt](fig.png) more\n', 'Text  more\n'],
-    ['a bare link definition', '[ref]: https://example.com\n', '\n'],
-    [
-      'a reference link, whose definition is deleted',
-      'A [reference][ref].\n\n[ref]: https://example.com/t\n',
-      'A [reference](https://example.com/t).\n',
-    ],
-    [
-      'a shortcut reference, whose definition is deleted',
-      'A [ref] here.\n\n[ref]: https://example.com/t\n',
-      'A [ref](https://example.com/t) here.\n',
-    ],
   ])('loses %s', (_name, source, current) => {
     expect(roundTrip(source)).toBe(current)
   })
@@ -233,6 +226,19 @@ describe('normalises formatting (accepted, and what rich mode warns about)', () 
     ['star bullets', '* one\n* two\n', '- one\n- two\n'],
     ['a loose list', '- one\n\n- two\n', '- one\n- two\n'],
     ['an intraword underscore', 'Cost 100% of a_b\n', 'Cost 100% of a\\_b\n'],
+    // The DEFINITION survives; only the reference form is normalised, so the
+    // link still resolves and nothing is lost. Carrying the reference form on
+    // the mark was rejected — see `ui/editor/link-definition.ts`.
+    [
+      'a reference link into inline form',
+      'A [reference][ref].\n\n[ref]: https://example.com/t\n',
+      'A [reference](https://example.com/t).\n\n[ref]: https://example.com/t\n',
+    ],
+    [
+      'a shortcut reference into inline form',
+      'A [ref] here.\n\n[ref]: https://example.com/t\n',
+      'A [ref](https://example.com/t) here.\n\n[ref]: https://example.com/t\n',
+    ],
   ])('rewrites %s', (_name, source, current) => {
     expect(roundTrip(source)).toBe(current)
   })

@@ -13,6 +13,7 @@ import { HtmlBlock, HtmlInline } from './html-passthrough'
 import { ImagePlaceholder } from './image'
 import { ImagePrompt } from './image-prompt'
 import { LinkPrompt } from './link'
+import { LinkDefinition } from './link-definition'
 import { MathBlock } from './math-block'
 import { MathInline } from './math-inline'
 import { SlashCommand } from './slash-command'
@@ -59,6 +60,7 @@ export function createExtensions({ onRequestLink, onRequestImage }: EditorHandle
     HtmlBlock,
     HtmlInline,
     ImagePlaceholder,
+    LinkDefinition,
     SlashCommand,
     LinkPrompt.configure({ onRequest: onRequestLink ?? (() => {}) }),
     ImagePrompt.configure({ onRequest: onRequestImage ?? (() => {}) }),
