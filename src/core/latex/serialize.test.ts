@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type GalleyConfig, presetFor } from '../config'
 import { parseMarkdown } from '../markdown/parse'
+import { buildFigureResolver, figureName } from '../project/figures'
 import { type SerializePart, serializeParts, serializeToLatex } from './serialize'
 
 const tex = (md: string, over: Partial<GalleyConfig> = {}): string =>
@@ -805,5 +806,69 @@ describe('serializeParts', () => {
     expect(result.diagnostics.map((d) => d.kind)).not.toContain(
       'structure-duplicate-heading',
     )
+  })
+})
+
+describe('project figures', () => {
+  const book = presetFor('book')
+  const resolver = buildFigureResolver(['ch1/diagram.png', 'ch3/diagram.png'])
+  const partOf = (path: string, source: string) => ({
+    tree: parseMarkdown(source),
+    spec: { role: 'main' as const, numbered: true, listed: true },
+    path,
+  })
+
+  it('names two same-named figures distinctly', () => {
+    const result = serializeParts(
+      [
+        partOf('ch1/chapter.md', '# One\n\n![](diagram.png)\n'),
+        partOf('ch3/chapter.md', '# Three\n\n![](diagram.png)\n'),
+      ],
+      book,
+      undefined,
+      resolver,
+    )
+    expect(result.images).toEqual([
+      figureName('ch1/diagram.png'),
+      figureName('ch3/diagram.png'),
+    ])
+    expect(result.images[0]).not.toBe(result.images[1])
+  })
+
+  it('resolves an Obsidian embed the same way', () => {
+    const result = serializeParts(
+      [partOf('ch1/chapter.md', '# One\n\n![[diagram.png]]\n')],
+      book,
+      undefined,
+      resolver,
+    )
+    expect(result.images).toEqual([figureName('ch1/diagram.png')])
+    expect(result.body).toContain(`\\includegraphics`)
+  })
+
+  it('diagnoses a reference that resolves nowhere, rather than dropping it', () => {
+    const result = serializeParts(
+      [partOf('ch1/chapter.md', '# One\n\n![](missing.png)\n')],
+      book,
+      undefined,
+      resolver,
+    )
+    expect(result.images).toEqual([])
+    expect(result.body).toContain('Figure not included')
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: 'project-figure-unresolved',
+        detail: 'missing.png',
+        file: 'ch1/chapter.md',
+      }),
+    )
+  })
+
+  it('leaves single-document naming exactly as it was', () => {
+    const result = serializeParts(
+      [{ tree: parseMarkdown('# A\n\n![](diagram.png)\n') }],
+      book,
+    )
+    expect(result.images).toEqual(['diagram.png'])
   })
 })

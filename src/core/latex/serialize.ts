@@ -30,8 +30,10 @@ import {
 } from '../config'
 import { type Diagnostic, DiagnosticCollector } from '../diagnostics'
 import { findScriptGaps, typefaceOrDefault, typefacesWithGreek } from '../fonts'
-import { classifyImage, SUPPORTED_IMAGE_LIST } from '../images'
+import { classifyImage, type ImageClassification, SUPPORTED_IMAGE_LIST } from '../images'
 import { frontmatterData } from '../markdown/frontmatter'
+import { figureName } from '../project/figures'
+import type { FigureResolver } from '../project/types'
 import {
   DEFAULT_PART,
   headingText,
@@ -159,10 +161,18 @@ class Serializer {
    * `structure-duplicate-heading` already names the real cause.
    */
   #duplicatedTitles: ReadonlySet<string> = new Set()
+  readonly #resolver: FigureResolver | undefined
+  /** Project-relative path of the part being walked, for figure resolution. */
+  #currentPart = ''
 
-  constructor(config: GalleyConfig, available?: ReadonlySet<string>) {
+  constructor(
+    config: GalleyConfig,
+    available?: ReadonlySet<string>,
+    resolver?: FigureResolver,
+  ) {
     this.#config = config
     this.#available = available
+    this.#resolver = resolver
   }
 
   run(tree: Root): SerializeResult {
@@ -202,7 +212,10 @@ class Serializer {
     // frontmatter blocks add no stray blank lines — a single document's body
     // stays byte-for-byte what it was.
     const bodies = parts
-      .map((part) => this.#blocks(part.tree.children))
+      .map((part) => {
+        this.#currentPart = part.path ?? ''
+        return this.#blocks(part.tree.children)
+      })
       .filter((b) => b.length > 0)
 
     return {
@@ -731,11 +744,27 @@ class Serializer {
   }
 
   /**
+   * What a reference means, and what the engine will call it.
+   *
+   * `classifyImage` stays the only authority on an image's KIND. Only the name
+   * is overridden, and only in a project, where identity is the file's path
+   * rather than its basename — see `src/core/project/figures.ts`.
+   */
+  #resolveImage(url: string): ImageClassification | { kind: 'unresolved' } {
+    const classified = classifyImage(url)
+    if (classified.kind !== 'supported' || this.#resolver === undefined) return classified
+
+    const path = this.#resolver(url, this.#currentPart)
+    if (path === null) return { kind: 'unresolved' }
+    return { kind: 'supported', name: figureName(path), extension: classified.extension }
+  }
+
+  /**
    * The `\\includegraphics` call, or null when the reference cannot be drawn.
    * The name is already sanitised, so it needs no escaping — see `images.ts`.
    */
   #graphic(url: string): string | null {
-    const image = classifyImage(url)
+    const image = this.#resolveImage(url)
     if (image.kind !== 'supported') return null
     // A name galley cannot supply bytes for must NOT become an
     // \includegraphics: the engine stops the whole document with "Unable to
@@ -752,8 +781,15 @@ class Serializer {
    * gap: the reader sees exactly where the image belongs and why it is absent.
    */
   #unrenderable(alt: string, url: string): string {
-    const image = classifyImage(url)
-    if (image.kind === 'remote') {
+    const image = this.#resolveImage(url)
+    if (image.kind === 'unresolved') {
+      this.#diagnostics.add(
+        'project-figure-unresolved',
+        'No file with this name is in the project folder. Obsidian searches the whole vault; galley searches this book, so a figure kept outside it has to be moved in.',
+        url,
+        this.#currentPart || undefined,
+      )
+    } else if (image.kind === 'remote') {
       this.#diagnostics.add(
         'image-unsupported',
         'An image hosted elsewhere is not included. galley never fetches from the network, so only a file you attach can be typeset.',
@@ -809,6 +845,7 @@ export function serializeParts(
   parts: readonly SerializePart[],
   config: GalleyConfig,
   available?: ReadonlySet<string>,
+  resolver?: FigureResolver,
 ): SerializeResult {
-  return new Serializer(config, available).runParts(parts)
+  return new Serializer(config, available, resolver).runParts(parts)
 }

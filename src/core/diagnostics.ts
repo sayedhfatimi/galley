@@ -36,6 +36,8 @@ export type DiagnosticKind =
   | 'project-part-headingless'
   /** A file in the book has more than one top-level heading. */
   | 'project-part-multiple-headings'
+  /** A figure reference matched no file in the project. */
+  | 'project-figure-unresolved'
 
 export interface Diagnostic {
   kind: DiagnosticKind
