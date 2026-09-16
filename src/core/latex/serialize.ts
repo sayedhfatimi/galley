@@ -446,6 +446,7 @@ class Serializer {
           'raw-html',
           'HTML in the source cannot be typeset, so it appears as literal text.',
           node.value.slice(0, 80),
+          this.#currentPart || undefined,
         )
         return escapeText(node.value)
       case 'yaml':
@@ -462,6 +463,7 @@ class Serializer {
       'unsupported-construct',
       'Part of the source had no typeset equivalent and appears as plain text.',
       node.type,
+      this.#currentPart || undefined,
     )
     return 'children' in node ? this.#inline(node.children as RootContent[]) : ''
   }
@@ -600,6 +602,8 @@ class Serializer {
       this.#diagnostics.add(
         'verbatim-delimiter',
         'A code block contained a LaTeX verbatim terminator and was rendered as plain text.',
+        undefined,
+        this.#currentPart || undefined,
       )
       return `\\begin{quote}\\ttfamily\n${escapeText(node.value)}\n\\end{quote}`
     }
@@ -679,6 +683,7 @@ class Serializer {
           'raw-html',
           'HTML in the source cannot be typeset, so it appears as literal text.',
           node.value.slice(0, 80),
+          this.#currentPart || undefined,
         )
         return escapeText(node.value)
       default:
@@ -699,7 +704,12 @@ class Serializer {
       const message = gap.fixable
         ? `${gap.script} letters need a typeface that covers them. Try ${typefacesWithGreek().join(', ')}.`
         : `${gap.script} cannot be typeset — no bundled typeface covers it.`
-      this.#diagnostics.add('missing-glyphs', message, gap.sample)
+      this.#diagnostics.add(
+        'missing-glyphs',
+        message,
+        gap.sample,
+        this.#currentPart || undefined,
+      )
     }
   }
 
@@ -794,18 +804,21 @@ class Serializer {
         'image-unsupported',
         'An image hosted elsewhere is not included. galley never fetches from the network, so only a file you attach can be typeset.',
         url,
+        this.#currentPart || undefined,
       )
     } else if (image.kind === 'unsupported-format') {
       this.#diagnostics.add(
         'image-unsupported',
         `That image format cannot be typeset. Use ${SUPPORTED_IMAGE_LIST}.`,
         url,
+        this.#currentPart || undefined,
       )
     } else {
       this.#diagnostics.add(
         'image-unsupported',
         'That image is named by the document but has not been added. Use the picture button, or drop the file in, to include it.',
         url,
+        this.#currentPart || undefined,
       )
     }
     const caption = alt.trim() ? escapeText(alt.trim()) : escapeText(url)

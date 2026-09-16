@@ -881,3 +881,66 @@ describe('project figures', () => {
     expect(result.images).toEqual(['diagram.png'])
   })
 })
+
+/**
+ * `Diagnostic.file` is part of the collector's de-dup key, so a diagnostic that
+ * never sets it is de-duplicated ACROSS the whole book: the first raw-html in
+ * chapter one silenced every later one in a three-hundred-chapter manuscript,
+ * and the one notice that survived named no chapter, so there was no way to
+ * find it. Only three of sixteen `#diagnostics.add` sites passed the file.
+ *
+ * Two identical chapters is the discriminating case: same kind, same detail,
+ * different file. Without the file it collapses to one notice per kind.
+ */
+describe('diagnostics name the part they were raised in', () => {
+  const book = presetFor('book')
+  const chapter = (path: string, source: string): SerializePart => ({
+    tree: parseMarkdown(source),
+    spec: { role: 'main', numbered: true, listed: true },
+    path,
+  })
+
+  // Each of these is the same kind with the same detail in both files.
+  const source = (title: string) =>
+    [
+      `# ${title}`,
+      '',
+      '<div>raw</div>',
+      '',
+      '```',
+      '\\end{Verbatim}',
+      '```',
+      '',
+      'ΩΜΕΓΑ',
+      '',
+      '![](x.svg)',
+      '',
+      '![](missing.png)',
+      '',
+    ].join('\n')
+
+  const result = serializeParts(
+    [chapter('01-a.md', source('One')), chapter('02-b.md', source('Two'))],
+    book,
+    new Set<string>(),
+  )
+
+  const filesFor = (kind: string) =>
+    result.diagnostics.filter((d) => d.kind === kind).map((d) => d.file)
+
+  it.each([
+    ['raw-html'],
+    ['verbatim-delimiter'],
+    ['missing-glyphs'],
+    // Twice over: the unsupported-format branch and the not-attached branch.
+    ['image-unsupported'],
+  ])('raises %s once per file, each naming its own', (kind) => {
+    const files = filesFor(kind)
+    expect(files.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(files)).toEqual(new Set(['01-a.md', '02-b.md']))
+  })
+
+  it('reports a kind raised in two files twice, not once', () => {
+    expect(filesFor('raw-html')).toEqual(['01-a.md', '02-b.md'])
+  })
+})
