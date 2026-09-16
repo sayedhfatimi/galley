@@ -1,4 +1,4 @@
-import { Download, FileText, FolderOpen, Loader2, X } from 'lucide-react'
+import { CircleHelp, Download, FileText, FolderOpen, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import type { GalleyConfig } from '@/core/config'
@@ -30,6 +30,16 @@ export interface ActionBarProps {
   /** In project mode, the book's settings rather than the document's. */
   projectConfig?: GalleyConfig
   onProjectConfigChange?: (config: GalleyConfig) => void
+  /**
+   * Help, which belongs to the application rather than to either editing
+   * surface.
+   *
+   * It used to live in the editor's own toolbar — which a folder project
+   * replaces, so the one reference an author has was reachable in one mode
+   * and not the other. For a project with no support channel beyond this
+   * dialog and the README, that is not a small thing.
+   */
+  onHelp: () => void
 }
 
 export function ActionBar({
@@ -44,6 +54,7 @@ export function ActionBar({
   onCloseProject,
   projectConfig,
   onProjectConfigChange,
+  onHelp,
 }: ActionBarProps) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b bg-background/80 px-4 backdrop-blur">
@@ -83,6 +94,11 @@ export function ActionBar({
             </Button>
           )
         )}
+
+        <Button variant="ghost" size="sm" onClick={onHelp} aria-label="Help and about">
+          <CircleHelp className="size-3.5" />
+          Help
+        </Button>
 
         <LatexDialog tex={tex} onDownload={onDownloadTex} />
 

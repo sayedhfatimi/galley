@@ -4,6 +4,7 @@ import { createZip } from '@/core/zip'
 import { ActionBar } from '@/ui/ActionBar'
 import { Diagnostics } from '@/ui/Diagnostics'
 import { ErrorBoundary } from '@/ui/ErrorBoundary'
+import { HelpDialog } from '@/ui/editor/HelpDialog'
 import { MarkdownEditor } from '@/ui/editor/MarkdownEditor'
 import { listImageNames, loadImages } from '@/ui/lib/imageStore'
 import { useStore } from '@/ui/lib/store'
@@ -47,11 +48,30 @@ export default function App() {
   // — permission needs a gesture — and a browser that cannot do this at all
   // needs somewhere to say so.
   const [openingProject, setOpeningProject] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const inProject = mode === 'project'
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
+
+  /**
+   * Help, bound once at the root.
+   *
+   * Registered here rather than in an editor because a folder project mounts
+   * TWO of them, and two registrations of a TOGGLE cancel each other — the
+   * shortcut would read as broken rather than doubled. It also has to work in
+   * both modes, and only the root spans both.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== '/' || !(event.metaKey || event.ctrlKey)) return
+      event.preventDefault()
+      setHelpOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // Frontmatter fills only the fields the reader has not set themselves, so
   // their own edits survive the next keystroke in the document.
@@ -174,6 +194,7 @@ export default function App() {
           }}
           projectConfig={inProject ? projectOutput?.config : undefined}
           onProjectConfigChange={inProject ? projectOutput?.setConfig : undefined}
+          onHelp={() => setHelpOpen(true)}
         />
 
         {inProject ? (
@@ -216,6 +237,8 @@ export default function App() {
 
         <PrivacyNotice />
       </div>
+
+      <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
 
       <ResultDialog
         compile={compile}

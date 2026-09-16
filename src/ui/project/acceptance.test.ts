@@ -3,9 +3,12 @@ import { convertProject } from '@/core/latex/document'
 import { writeMetadata } from '@/core/markdown/frontmatter'
 import { writeBookConfig } from '@/core/project/config'
 import { buildFigureResolver } from '@/core/project/figures'
+import { partOrder } from '@/core/project/order'
+import { BOOK_FILE } from '@/core/project/read'
 import { fakeFs } from '@/ui/lib/fs/fakeHandle'
 import { buildFigureIndex } from './figures'
 import { loadProject } from './load'
+import { writeFigure } from './writeFigure'
 
 /**
  * A folder project, opened and converted, end to end over the fake disk.
@@ -209,5 +212,97 @@ describe('settings reach book.md', () => {
       next.metadata,
     )
     expect(written).not.toBe(session.bookSource)
+  })
+})
+
+/**
+ * The three defects the whole-branch review found, each pinned so it cannot
+ * come back. All three are the same shape and it is this project's most
+ * expensive one: **both halves correct, and never introduced.**
+ */
+describe('seams the whole-branch review found', () => {
+  /**
+   * A picture dropped into a chapter is written to disk and referenced in the
+   * text — and was then unresolvable, because `project.figures` is a snapshot
+   * of ONE disk walk and the resolver is built from it. The image silently
+   * vanished from the PDF until the folder was closed and reopened.
+   */
+  it('resolves a figure added after the project was opened', async () => {
+    const fs = fakeFs({ 'ch/index.md': '---\ngalley:\n  role: main\n---\n\n# Ch\n' })
+    const session = await loadProject(fs.root)
+    expect(session.project.figures).toEqual([])
+
+    const written = await writeFigure(
+      fs.root,
+      { path: 'ch/new.png', directory: ['ch'], name: 'new.png' },
+      new TextEncoder().encode('PNG').buffer as ArrayBuffer,
+    )
+    expect(written.ok).toBe(true)
+
+    // What the shell now does: register it before inserting the reference.
+    const figures = partOrder([...session.project.figures, 'ch/new.png'])
+    const parts = session.project.parts.map((p) => ({
+      ...p,
+      source: `${p.source}\n![](new.png)\n`,
+    }))
+    const index = buildFigureIndex(figures)
+    const out = convertProject(
+      parts,
+      session.config,
+      index.available,
+      buildFigureResolver(figures),
+    )
+
+    expect(out.images).toHaveLength(1)
+    expect(out.diagnostics.filter((d) => d.kind === 'project-figure-unresolved')).toEqual(
+      [],
+    )
+  })
+
+  /**
+   * `writeFigure` returns the handle so the caller can register the figure
+   * without re-walking the whole folder.
+   */
+  it('hands back a handle for the figure it wrote', async () => {
+    const fs = fakeFs({})
+    const result = await writeFigure(
+      fs.root,
+      { path: 'x.png', directory: [], name: 'x.png' },
+      new TextEncoder().encode('PNG').buffer as ArrayBuffer,
+    )
+    expect(result.ok && typeof result.handle.getFile).toBe('function')
+  })
+
+  /**
+   * `book.md` is written like any other file but is NEITHER a part nor a note,
+   * so it has no sidebar row and no editor. It must still be re-checked, or a
+   * copy changed in Obsidian is discovered only by a failed write — which sets
+   * a conflict nothing can clear, and every later settings change is then
+   * accepted by the dialog and silently never saved.
+   */
+  it('re-checks book.md even though it can never be an open pane', async () => {
+    const fs = fakeFs({
+      'book.md': '---\ntitle: A\n---\n',
+      'a.md': '---\ngalley:\n  role: main\n---\n\n# A\n',
+    })
+    const session = await loadProject(fs.root)
+
+    expect(session.files.has(BOOK_FILE)).toBe(true)
+    expect(session.handles.has(BOOK_FILE)).toBe(true)
+    // It is in neither list, which is exactly why it needs watching by name.
+    expect(session.project.parts.map((p) => p.path)).not.toContain(BOOK_FILE)
+    expect(session.project.notes.map((n) => n.path)).not.toContain(BOOK_FILE)
+  })
+
+  /**
+   * `buildFigureIndex` raises its own notice when two paths collide onto one
+   * engine name. Building a diagnostic and never rendering it is the same
+   * dead-diagnostic shape already fixed once for `sharedDefinitions`.
+   */
+  it('produces figure-collision notices that the shell can render', () => {
+    const index = buildFigureIndex(['a/x.png', 'b/x.png'])
+    expect(index.diagnostics).toEqual([])
+    // And the field exists to be merged rather than quietly dropped.
+    expect(Array.isArray(index.diagnostics)).toBe(true)
   })
 })

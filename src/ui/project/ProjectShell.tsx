@@ -6,9 +6,15 @@ import {
   ResizablePanelGroup,
 } from '@/components/ui/resizable'
 import type { GalleyConfig } from '@/core/config'
+import { presetFor } from '@/core/config'
 import { convertProject } from '@/core/latex/document'
-import { writeMetadata } from '@/core/markdown/frontmatter'
-import { writeBookConfig } from '@/core/project/config'
+import {
+  extractFrontmatter,
+  frontmatterData,
+  writeMetadata,
+} from '@/core/markdown/frontmatter'
+import { parseMarkdown } from '@/core/markdown/parse'
+import { readBookConfig, writeBookConfig } from '@/core/project/config'
 import { buildFigureResolver } from '@/core/project/figures'
 import { BOOK_FILE } from '@/core/project/read'
 import { Diagnostics } from '@/ui/Diagnostics'
@@ -88,6 +94,7 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
   const setProject = useStore((s) => s.setProject)
   const setProjectConfig = useStore((s) => s.setProjectConfig)
   const setBookSource = useStore((s) => s.setBookSource)
+  const addFigure = useStore((s) => s.addFigure)
 
   const [mode, setMode] = useState<EditorMode>('source')
   const [richWarned, setRichWarned] = useState(false)
@@ -124,7 +131,11 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
     [session?.project.figures],
   )
 
-  const conversion = useMemo(() => {
+  // The figure index raises its own notices — two paths colliding onto one
+  // engine name — and they have to be SHOWN. Building them and never reading
+  // them is the same dead-diagnostic shape already fixed once on this branch
+  // for `sharedDefinitions`.
+  const conversionRef = useMemo(() => {
     if (!session) return null
     const resolver = buildFigureResolver(session.project.figures)
     return convertProject(
@@ -137,8 +148,22 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
 
   // Re-checked when the tab regains focus and whenever a pane switches file: a
   // change can arrive from a phone over Sync with nothing local to announce it.
+  /**
+   * `book.md` is re-checked alongside the open panes even though it can never
+   * BE a pane.
+   *
+   * It is written like any other file — Document setup is an edit to it — but
+   * `readProject` returns it as neither a part nor a note, so it has no
+   * sidebar row and no editor. Left out of this set, a `book.md` changed in
+   * Obsidian would only be discovered by a failed write, which sets a conflict
+   * that nothing could then clear: every later settings change would be
+   * accepted by the dialog and silently never saved.
+   */
   const openPaths = useMemo(
-    () => [session?.panes.left, session?.panes.right].filter((p): p is string => !!p),
+    () =>
+      [session?.panes.left, session?.panes.right, BOOK_FILE].filter(
+        (p): p is string => !!p,
+      ),
     [session?.panes.left, session?.panes.right],
   )
 
@@ -240,6 +265,12 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
     [setProjectConfig, session, setBookSource, autosave],
   )
 
+  const conversion = conversionRef
+  const allDiagnostics = useMemo(
+    () => [...figures.diagnostics, ...(conversion?.diagnostics ?? [])],
+    [figures.diagnostics, conversion],
+  )
+
   useEffect(() => {
     if (!conversion || !session) return
     onOutput({
@@ -272,6 +303,11 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
         const result = await writeFigure(session.handle, { path, directory, name }, bytes)
 
         if (result.ok) {
+          // Registered BEFORE the reference is inserted. `project.figures` is a
+          // snapshot of one disk walk and the resolver is built from it, so a
+          // picture written into the folder without this is on disk, referenced
+          // in the chapter, and unresolvable until the project is reopened.
+          addFigure(result.path, result.handle)
           insert(relativeReference(into, result.path))
           setFigureError(null)
           continue
@@ -288,7 +324,7 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
         return
       }
     },
-    [session],
+    [session, addFigure],
   )
 
   /**
@@ -381,6 +417,7 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
   }
 
   const activePath = session.panes[session.lastFocused] ?? session.panes.left
+  const bookConflict = files.get(BOOK_FILE)?.conflict != null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -389,7 +426,7 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
           <Sidebar
             project={session.project}
             files={files}
-            diagnostics={conversion?.diagnostics ?? []}
+            diagnostics={allDiagnostics}
             active={session.panes}
             onOpen={(path) => setPane('left', path)}
             onOpenBeside={(path) => setPane('right', path)}
@@ -400,6 +437,27 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
         <ResizableHandle />
 
         <ResizablePanel id="editors" defaultSize={80}>
+          {bookConflict && (
+            <ConflictBar
+              path={BOOK_FILE}
+              onTakeTheirs={async () => {
+                const handle = handles.get(BOOK_FILE)
+                if (!handle) return
+                const file = await handle.getFile()
+                const text = await file.text()
+                setBookSource(text)
+                setProjectConfig({
+                  ...presetFor(
+                    readBookConfig(frontmatterData(parseMarkdown(text))).character ??
+                      session.config.character,
+                  ),
+                  ...readBookConfig(frontmatterData(parseMarkdown(text))),
+                  metadata: extractFrontmatter(parseMarkdown(text)),
+                })
+                autosave.resolveWithTheirs(BOOK_FILE, file.lastModified)
+              }}
+            />
+          )}
           <SharedToolbar
             editor={editors[session.lastFocused]}
             active={session.lastFocused}
@@ -475,9 +533,9 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
         </p>
       )}
 
-      {conversion && conversion.diagnostics.length > 0 && (
+      {allDiagnostics.length > 0 && (
         <div className="max-h-32 shrink-0 overflow-auto border-t px-4 py-2">
-          <Diagnostics items={conversion.diagnostics} />
+          <Diagnostics items={allDiagnostics} />
         </div>
       )}
     </div>

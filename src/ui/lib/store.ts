@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { DEFAULT_CONFIG, type GalleyConfig, type Metadata } from '@/core/config'
+import { partOrder } from '@/core/project/order'
 import type { Project } from '@/core/project/types'
 
 export type Theme = 'light' | 'dark'
@@ -125,6 +126,16 @@ export interface GalleyStore {
   setFileState: (path: string, patch: Partial<FileState>) => void
   setProject: (project: Project) => void
   setBookSource: (source: string) => void
+  /**
+   * Register a figure that was added after the project was opened.
+   *
+   * `project.figures` is a snapshot of one disk walk, and the resolver is
+   * built from it. Writing a picture into the folder without telling the
+   * session leaves the file genuinely on disk and genuinely referenced, and
+   * the very next render unable to resolve it — both halves correct and never
+   * introduced, which is this project's most expensive recurring shape.
+   */
+  addFigure: (path: string, handle: FileSystemFileHandle) => void
 }
 
 /** A file galley has not read yet is not clean, it is simply unknown. */
@@ -337,6 +348,25 @@ export const useStore = create<GalleyStore>()(
 
       setBookSource: (bookSource) =>
         set((s) => (s.session ? { session: { ...s.session, bookSource } } : {})),
+
+      addFigure: (path, handle) =>
+        set((s) => {
+          if (!s.session || s.session.project.figures.includes(path)) return {}
+          const handles = new Map(s.session.handles)
+          handles.set(path, handle)
+          return {
+            session: {
+              ...s.session,
+              handles,
+              project: {
+                ...s.session.project,
+                // Sorted the way `readProject` sorts them, so a figure added
+                // now sits where a figure found at open time would have.
+                figures: partOrder([...s.session.project.figures, path]),
+              },
+            },
+          }
+        }),
     }),
     {
       name: 'galley',

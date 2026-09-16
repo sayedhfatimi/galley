@@ -1,6 +1,6 @@
 import type { Editor } from '@tiptap/core'
-import { CircleHelp, FileUp, PenLine, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { FileUp, PenLine, Trash2 } from 'lucide-react'
+import { useCallback, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -13,7 +13,6 @@ import {
 import { pruneImages } from '@/ui/lib/imageStore'
 import { attachImage } from './attachImage'
 import { type EditorMode, EditorPane } from './EditorPane'
-import { HelpDialog } from './HelpDialog'
 import { Toolbar } from './Toolbar'
 import { ToolbarButton } from './ToolbarButton'
 
@@ -67,26 +66,10 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const [mode, setMode] = useState<EditorMode>('rich')
   const [tocOpen, setTocOpen] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
-
-  // Bound on the window rather than through the editor keymap, because help
-  // should open whether or not the caret is in the document. It lives HERE and
-  // not in `EditorPane`: a folder project mounts two panes, and two
-  // registrations of a TOGGLE cancel each other out — the shortcut would look
-  // broken rather than doubled, which is the harder bug to find.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== '/' || !(event.metaKey || event.ctrlKey)) return
-      event.preventDefault()
-      setHelpOpen((open) => !open)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
 
   const toggleMode = useCallback(() => {
     setMode((m) => (m === 'rich' ? 'source' : 'rich'))
@@ -155,7 +138,6 @@ export function MarkdownEditor({
         onOpen={openFile}
         onToggleToc={() => setTocOpen((v) => !v)}
         tocOpen={tocOpen}
-        onHelp={() => setHelpOpen(true)}
         onToggleMode={toggleMode}
         onClear={() => setClearOpen(true)}
         mode={mode}
@@ -166,11 +148,6 @@ export function MarkdownEditor({
           icon={<FileUp className="size-4" />}
           label="Open a Markdown file"
           onClick={openFile}
-        />
-        <ToolbarButton
-          icon={<CircleHelp className="size-4" />}
-          label="Help and about"
-          onClick={() => setHelpOpen(true)}
         />
         <ToolbarButton
           icon={<PenLine className="size-4" />}
@@ -198,8 +175,6 @@ export function MarkdownEditor({
           e.target.value = ''
         }}
       />
-
-      <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
 
       <Dialog open={clearOpen} onOpenChange={setClearOpen}>
         <DialogContent>

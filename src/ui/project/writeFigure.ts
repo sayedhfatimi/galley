@@ -66,7 +66,8 @@ export function suggestName(name: string, taken: ReadonlySet<string>): string {
 }
 
 export type FigureWrite =
-  | { ok: true; path: string }
+  /** `handle` is returned so the caller can register the figure without re-walking. */
+  | { ok: true; path: string; handle: FileSystemFileHandle }
   | { ok: false; reason: 'unsupported'; message: string }
   | { ok: false; reason: 'exists'; suggestion: string }
   | { ok: false; reason: 'failed' }
@@ -117,7 +118,7 @@ export async function writeFigure(
     const writable = await handle.createWritable()
     await writable.write(bytes)
     await writable.close()
-    return { ok: true, path: placement.path }
+    return { ok: true, path: placement.path, handle }
   } catch {
     return { ok: false, reason: 'failed' }
   }

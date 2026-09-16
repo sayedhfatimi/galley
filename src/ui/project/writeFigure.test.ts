@@ -54,7 +54,11 @@ describe('writeFigure', () => {
     const fs = fakeFs({ 'ch/index.md': '# A' })
     const result = await writeFigure(fs.root, placement('ch/diagram.png'), bytes)
 
-    expect(result).toEqual({ ok: true, path: 'ch/diagram.png' })
+    expect(result).toMatchObject({ ok: true, path: 'ch/diagram.png' })
+    // The handle comes back so the caller can register the figure without
+    // re-walking the folder — without it the picture is on disk, referenced,
+    // and unresolvable until the project is reopened.
+    expect(result.ok && typeof result.handle.getFile).toBe('function')
     expect(fs.files.get('ch/diagram.png')?.content).toBe('PNGBYTES')
   })
 
