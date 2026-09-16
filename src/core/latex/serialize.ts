@@ -30,8 +30,10 @@ import {
 } from '../config'
 import { type Diagnostic, DiagnosticCollector } from '../diagnostics'
 import { findScriptGaps, typefaceOrDefault, typefacesWithGreek } from '../fonts'
-import { classifyImage, SUPPORTED_IMAGE_LIST } from '../images'
+import { classifyImage, type ImageClassification, SUPPORTED_IMAGE_LIST } from '../images'
 import { frontmatterData } from '../markdown/frontmatter'
+import { figureName } from '../project/figures'
+import type { FigureResolver } from '../project/types'
 import {
   DEFAULT_PART,
   headingText,
@@ -126,7 +128,18 @@ class Serializer {
    * have no store to ask.
    */
   readonly #available: ReadonlySet<string> | undefined
+  /** Single-document mode only: the `structure:` block, keyed by heading text. */
   #structure: Map<string, PartSpec> = new Map()
+  /**
+   * The spec governing each root heading, by node identity.
+   *
+   * Keyed on the NODE rather than on its text so both modes share one lookup:
+   * a single document fills this from `structure:` by matching text, while a
+   * project fills it from each file's own `galley:` block. That is also what
+   * retires heading-text keying for projects — two files may hold identically
+   * titled chapters and be set differently.
+   */
+  #specByNode = new Map<Heading, PartSpec>()
   /**
    * Root-level depth-1 headings, by node identity. `#blockquote` calls
    * `#blocks` and `#listItem` calls `#block`, so a quoted or bulleted heading
@@ -148,18 +161,65 @@ class Serializer {
    * `structure-duplicate-heading` already names the real cause.
    */
   #duplicatedTitles: ReadonlySet<string> = new Set()
+  readonly #resolver: FigureResolver | undefined
+  /** Project-relative path of the part being walked, for figure resolution. */
+  #currentPart = ''
 
-  constructor(config: GalleyConfig, available?: ReadonlySet<string>) {
+  constructor(
+    config: GalleyConfig,
+    available?: ReadonlySet<string>,
+    resolver?: FigureResolver,
+  ) {
     this.#config = config
     this.#available = available
+    this.#resolver = resolver
   }
 
   run(tree: Root): SerializeResult {
-    this.#collectDefinitions(tree)
-    this.#prepareStructure(tree)
-    const body = this.#blocks(tree.children)
+    return this.runParts([{ tree }])
+  }
+
+  /**
+   * Walk every part of a book through THIS instance.
+   *
+   * One instance rather than one per file, because the state that decides a
+   * book's divisions spans files: `#openRole` is what stops \mainmatter being
+   * emitted once per chapter, `#highestRank` is what notices a part written
+   * out of book order, and `#images`, `#definitions` and `#footnotes` are the
+   * book's, not any one file's.
+   */
+  runParts(parts: readonly SerializePart[]): SerializeResult {
+    // Definitions first, across EVERY part: a link or footnote defined in one
+    // chapter and referenced in another must resolve, exactly as it would if
+    // the book were one file.
+    for (const part of parts) this.#collectDefinitions(part.tree)
+
+    // A part WITHOUT a spec is a single document, governed by its own
+    // `structure:` block. Passing several of those at once is not a supported
+    // shape — `#structure` and `#duplicatedTitles` belong to one document and
+    // the last one read would win — and it cannot arise: a project part always
+    // carries the spec its `galley:` block resolved to (see project/types.ts),
+    // and a single document is always exactly one part.
+    for (const part of parts) {
+      if (part.spec) this.#prepareProjectPart(part.tree, part.spec, part.path)
+      else this.#prepareDocumentStructure(part.tree)
+    }
+
+    this.#resolveMatterOwnership()
+
+    // `#block` returns '' for a `yaml` node ("consumed elsewhere") and
+    // `#blocks` filters empty strings BEFORE joining, so N parts carrying N
+    // frontmatter blocks add no stray blank lines — a single document's body
+    // stays byte-for-byte what it was.
+    const bodies = parts
+      .map((part) => {
+        this.#currentPart = part.path ?? ''
+        return this.#blocks(part.tree.children)
+      })
+      .filter((b) => b.length > 0)
+
     return {
-      body,
+      body: bodies.join('\n\n'),
       diagnostics: this.#diagnostics.list(),
       images: [...this.#images],
       ownsMatterDivisions: this.#ownsMatterDivisions,
@@ -167,21 +227,110 @@ class Serializer {
   }
 
   /**
-   * Read the structure block and check it against the headings that exist.
+   * A project part: the FILE carries the spec, and its root headings inherit
+   * it. No heading-text lookup is involved, so two files may hold identically
+   * titled chapters and still be set apart.
+   */
+  #prepareProjectPart(tree: Root, spec: PartSpec, path: string | undefined): void {
+    const headings: Heading[] = []
+    for (const node of tree.children) {
+      if (node.type === 'heading' && node.depth === 1) headings.push(node)
+    }
+
+    if (headings.length === 0) {
+      this.#diagnostics.add(
+        'project-part-headingless',
+        'A file in the book has no top-level heading, so it opens no chapter of its own and its text continues the chapter before it. Give it a "# " heading.',
+        undefined,
+        path,
+      )
+    } else if (headings.length > 1) {
+      this.#diagnostics.add(
+        'project-part-multiple-headings',
+        'A file in the book has more than one top-level heading, so it becomes several chapters that share its settings. Split it, or demote the extra headings.',
+        undefined,
+        path,
+      )
+    }
+
+    for (const node of headings) {
+      this.#parts.add(node)
+      this.#specByNode.set(node, spec)
+    }
+  }
+
+  /**
+   * Whether the body opens its own \mainmatter/\backmatter.
+   *
+   * Decided once, over every part, AFTER all specs are known — a project's
+   * divisions span files, so no single file can answer this. Only specs that
+   * actually govern a heading count: an unmatched `structure:` entry does
+   * nothing, and counting it would make a document believe it owns divisions
+   * it then never emits.
+   */
+  #resolveMatterOwnership(): void {
+    const divided = [...this.#specByNode.values()].some((spec) => spec.role !== 'main')
+    if (!divided) return
+
+    if (usesMatter(this.#config.character)) {
+      this.#ownsMatterDivisions = true
+      return
+    }
+
+    // \frontmatter, \mainmatter and \backmatter are book-class commands. Saying
+    // nothing here would be an inert control: the reader sets front matter, the
+    // document class discards it, and nothing explains why.
+    //
+    // Deliberately silent on numbering: a part can still be numbered here (an
+    // Article's `{ role: back, numbered: true }` emits a numbered
+    // `\section`), so a message claiming the parts were "set unnumbered"
+    // would be false whenever the writer asked for numbering. The one claim
+    // that is true regardless is that the division itself — and the roman/
+    // arabic page-numbering restart that comes with it — does not exist
+    // outside a Book.
+    this.#diagnostics.add(
+      'structure-ignored',
+      `Front and back matter exist only in a Book, so the page numbering does not restart in a ${characterLabel(this.#config.character)}.`,
+      characterLabel(this.#config.character),
+    )
+  }
+
+  /**
+   * Read one document's structure block and check it against the headings that
+   * exist.
    *
    * A pre-pass rather than a check during the walk, because "this entry matches
    * nothing" is only knowable once every heading has been seen.
    */
-  #prepareStructure(tree: Root): void {
-    // Collected unconditionally — not just when a `structure:` block exists —
-    // because this set is also what `#heading` uses to decide whether a
-    // depth-1 node is a part at all. See the field comment.
+  #prepareDocumentStructure(tree: Root): void {
+    // Collected into a LOCAL array, not just added to `#parts`: `#parts` is
+    // shared across every part `runParts` walks, and by the time a later
+    // document part is prepared it holds every heading a project part before
+    // it already handed its own spec via `#prepareProjectPart`. Both loops
+    // below must scan only THIS tree's own headings — scanning `#parts`
+    // instead would let this document's `structure:` block overwrite a
+    // project heading's spec in `#specByNode`, and let its duplicate-title
+    // scan raise `structure-duplicate-heading` against a project file's
+    // heading it has no business seeing. Still added to `#parts` too: that
+    // set is also what `#heading` uses to decide whether a depth-1 node is a
+    // part at all. See the field comment.
+    const own: Heading[] = []
     for (const node of tree.children) {
-      if (node.type === 'heading' && node.depth === 1) this.#parts.add(node)
+      if (node.type === 'heading' && node.depth === 1) {
+        own.push(node)
+        this.#parts.add(node)
+      }
     }
 
     this.#structure = readStructure(frontmatterData(tree))
-    if (this.#structure.size === 0) return
+    if (this.#structure.size === 0) {
+      // Assigned on every path through this method, including this early
+      // return: leaving the previous document's `#duplicatedTitles` in place
+      // would let a duplicated title from an earlier part suppress a
+      // legitimate `structure-order` notice on this one.
+      this.#duplicatedTitles = new Set()
+      return
+    }
 
     const titles = new Set<string>()
     // Two root headings with identical text share one PartSpec, because parts
@@ -191,7 +340,7 @@ class Serializer {
     // the matter state machine somewhere the writer never intended. Flagged
     // here rather than left for the reader to notice in the contents page.
     const duplicated = new Set<string>()
-    for (const node of this.#parts) {
+    for (const node of own) {
       const title = headingText(node)
       if (titles.has(title)) duplicated.add(title)
       titles.add(title)
@@ -230,41 +379,19 @@ class Serializer {
       }
     }
 
-    // Only entries that actually matched a heading can open a division — one
-    // `structure-unmatched` has just reported does nothing, so counting it
-    // here would make a document with no matching parts believe it owns its
-    // own \mainmatter/\backmatter and then never emit either.
-    const divided = [...this.#structure].some(
-      ([key, spec]) => titles.has(key) && spec.role !== 'main',
-    )
-    if (!divided) return
-
-    if (usesMatter(this.#config.character)) {
-      this.#ownsMatterDivisions = true
-      return
+    // Only entries that actually matched a heading govern anything — one
+    // `structure-unmatched` has just reported does nothing — and the node map
+    // is what carries that fact on to `#resolveMatterOwnership`, which is now
+    // the single place matter ownership is decided for both modes.
+    for (const node of own) {
+      const spec = this.#structure.get(headingText(node))
+      if (spec) this.#specByNode.set(node, spec)
     }
-
-    // \frontmatter, \mainmatter and \backmatter are book-class commands. Saying
-    // nothing here would be an inert control: the reader sets front matter, the
-    // document class discards it, and nothing explains why.
-    //
-    // Deliberately silent on numbering: a part can still be numbered here (an
-    // Article's `{ role: back, numbered: true }` emits a numbered
-    // `\section`), so a message claiming the parts were "set unnumbered"
-    // would be false whenever the writer asked for numbering. The one claim
-    // that is true regardless is that the division itself — and the roman/
-    // arabic page-numbering restart that comes with it — does not exist
-    // outside a Book.
-    this.#diagnostics.add(
-      'structure-ignored',
-      `Front and back matter exist only in a Book, so the page numbering does not restart in a ${characterLabel(this.#config.character)}.`,
-      characterLabel(this.#config.character),
-    )
   }
 
   /** The part settings for a top-level heading. */
   #partFor(node: Heading): PartSpec {
-    return this.#structure.get(headingText(node)) ?? DEFAULT_PART
+    return this.#specByNode.get(node) ?? DEFAULT_PART
   }
 
   /** Link and footnote definitions may appear anywhere, so gather them first. */
@@ -319,6 +446,7 @@ class Serializer {
           'raw-html',
           'HTML in the source cannot be typeset, so it appears as literal text.',
           node.value.slice(0, 80),
+          this.#currentPart || undefined,
         )
         return escapeText(node.value)
       case 'yaml':
@@ -335,6 +463,7 @@ class Serializer {
       'unsupported-construct',
       'Part of the source had no typeset equivalent and appears as plain text.',
       node.type,
+      this.#currentPart || undefined,
     )
     return 'children' in node ? this.#inline(node.children as RootContent[]) : ''
   }
@@ -473,6 +602,8 @@ class Serializer {
       this.#diagnostics.add(
         'verbatim-delimiter',
         'A code block contained a LaTeX verbatim terminator and was rendered as plain text.',
+        undefined,
+        this.#currentPart || undefined,
       )
       return `\\begin{quote}\\ttfamily\n${escapeText(node.value)}\n\\end{quote}`
     }
@@ -552,6 +683,7 @@ class Serializer {
           'raw-html',
           'HTML in the source cannot be typeset, so it appears as literal text.',
           node.value.slice(0, 80),
+          this.#currentPart || undefined,
         )
         return escapeText(node.value)
       default:
@@ -572,7 +704,12 @@ class Serializer {
       const message = gap.fixable
         ? `${gap.script} letters need a typeface that covers them. Try ${typefacesWithGreek().join(', ')}.`
         : `${gap.script} cannot be typeset — no bundled typeface covers it.`
-      this.#diagnostics.add('missing-glyphs', message, gap.sample)
+      this.#diagnostics.add(
+        'missing-glyphs',
+        message,
+        gap.sample,
+        this.#currentPart || undefined,
+      )
     }
   }
 
@@ -617,11 +754,34 @@ class Serializer {
   }
 
   /**
+   * What a reference means, and what the engine will call it.
+   *
+   * `classifyImage` stays the only authority on an image's KIND. Only the name
+   * is overridden, and only in a project, where identity is the file's path
+   * rather than its basename — see `src/core/project/figures.ts`.
+   */
+  // `unresolved` and the two `classifyImage` rejections are structurally
+  // mutually exclusive, which is why `#unrenderable` can branch on them as a
+  // flat chain rather than weighing one against another. The resolver runs
+  // ONLY where `classified.kind` is already `supported`: a remote URL or an
+  // unsupported format returns before it, so neither can also come back
+  // unresolved, and `unresolved` can only ever mean "a name galley could have
+  // typeset, for which the project holds no file".
+  #resolveImage(url: string): ImageClassification | { kind: 'unresolved' } {
+    const classified = classifyImage(url)
+    if (classified.kind !== 'supported' || this.#resolver === undefined) return classified
+
+    const path = this.#resolver(url, this.#currentPart)
+    if (path === null) return { kind: 'unresolved' }
+    return { kind: 'supported', name: figureName(path), extension: classified.extension }
+  }
+
+  /**
    * The `\\includegraphics` call, or null when the reference cannot be drawn.
    * The name is already sanitised, so it needs no escaping — see `images.ts`.
    */
   #graphic(url: string): string | null {
-    const image = classifyImage(url)
+    const image = this.#resolveImage(url)
     if (image.kind !== 'supported') return null
     // A name galley cannot supply bytes for must NOT become an
     // \includegraphics: the engine stops the whole document with "Unable to
@@ -638,24 +798,37 @@ class Serializer {
    * gap: the reader sees exactly where the image belongs and why it is absent.
    */
   #unrenderable(alt: string, url: string): string {
-    const image = classifyImage(url)
-    if (image.kind === 'remote') {
+    // One kind, one cause. See `#resolveImage`: `unresolved` cannot coexist
+    // with `remote` or `unsupported-format`, so the first matching branch is
+    // also the only true one and the order below carries no precedence.
+    const image = this.#resolveImage(url)
+    if (image.kind === 'unresolved') {
+      this.#diagnostics.add(
+        'project-figure-unresolved',
+        'No file with this name is in the project folder. Obsidian searches the whole vault; galley searches this book, so a figure kept outside it has to be moved in.',
+        url,
+        this.#currentPart || undefined,
+      )
+    } else if (image.kind === 'remote') {
       this.#diagnostics.add(
         'image-unsupported',
         'An image hosted elsewhere is not included. galley never fetches from the network, so only a file you attach can be typeset.',
         url,
+        this.#currentPart || undefined,
       )
     } else if (image.kind === 'unsupported-format') {
       this.#diagnostics.add(
         'image-unsupported',
         `That image format cannot be typeset. Use ${SUPPORTED_IMAGE_LIST}.`,
         url,
+        this.#currentPart || undefined,
       )
     } else {
       this.#diagnostics.add(
         'image-unsupported',
         'That image is named by the document but has not been added. Use the picture button, or drop the file in, to include it.',
         url,
+        this.#currentPart || undefined,
       )
     }
     const caption = alt.trim() ? escapeText(alt.trim()) : escapeText(url)
@@ -674,4 +847,28 @@ export function serializeToLatex(
   available?: ReadonlySet<string>,
 ): SerializeResult {
   return new Serializer(config, available).run(tree)
+}
+
+export interface SerializePart {
+  tree: Root
+  /**
+   * The file's own settings. Omit for single-document mode, where the
+   * `structure:` block in this tree's frontmatter governs instead.
+   */
+  spec?: PartSpec
+  /** Project-relative path, for diagnostics that must name a file. */
+  path?: string
+}
+
+/**
+ * Serialize many parts as ONE book, through one shared `Serializer` — see
+ * `runParts` for why the instance is shared.
+ */
+export function serializeParts(
+  parts: readonly SerializePart[],
+  config: GalleyConfig,
+  available?: ReadonlySet<string>,
+  resolver?: FigureResolver,
+): SerializeResult {
+  return new Serializer(config, available, resolver).runParts(parts)
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type GalleyConfig, presetFor } from '../config'
-import { convert, readFrontmatter } from './document'
+import { convert, convertProject, readFrontmatter } from './document'
 
 const cfg = (over: Partial<GalleyConfig> = {}): GalleyConfig => ({
   ...DEFAULT_CONFIG,
@@ -113,6 +113,136 @@ describe('front and main matter', () => {
   })
 })
 
+describe('convertProject', () => {
+  const book = {
+    ...presetFor('book'),
+    metadata: { title: 'A Book', author: 'A. Writer' },
+  }
+  const part = (path: string, source: string, role: 'front' | 'main' | 'back') => ({
+    path,
+    source,
+    spec: { role, numbered: role === 'main', listed: true },
+  })
+
+  it('opens front matter before the first part and main matter once', () => {
+    const { tex } = convertProject(
+      [
+        part('01-copyright.md', '# Copyright\n', 'front'),
+        part('02-one.md', '# Chapter One\n', 'main'),
+        part('03-two.md', '# Chapter Two\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex.match(/\\frontmatter/g)).toHaveLength(1)
+    expect(tex.match(/\\mainmatter/g)).toHaveLength(1)
+    expect(tex.indexOf('\\frontmatter')).toBeLessThan(tex.indexOf('Copyright'))
+    expect(tex.indexOf('\\tableofcontents')).toBeLessThan(tex.indexOf('\\mainmatter'))
+  })
+
+  it('takes metadata from the config, not from a chapter’s frontmatter', () => {
+    const { tex } = convertProject(
+      [
+        part(
+          '01-a.md',
+          '---\ntitle: Not This\ngalley:\n  role: main\n---\n\n# A\n',
+          'main',
+        ),
+      ],
+      book,
+    )
+    expect(tex).toContain('A Book')
+    expect(tex).not.toContain('Not This')
+  })
+
+  it('compiles a project with no parts at all', () => {
+    const { tex } = convertProject([], book)
+    expect(tex).toContain('\\begin{document}')
+    expect(tex).toContain('\\end{document}')
+  })
+
+  // The owner's decision measured in Task 9: a reference only becomes a
+  // reference NODE when its definition is in the same parsed source. Two
+  // parts, a link in one resolving only against a definition in the other —
+  // this fails silently (renders as literal text) without project-wide
+  // definitions.
+  it('resolves a link reference defined in a different part', () => {
+    const { tex } = convertProject(
+      [
+        part('01-a.md', '# A\n\nSee [the site][ref].\n', 'main'),
+        part('02-b.md', '# B\n\n[ref]: https://example.com\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex).toContain('\\href{https://example.com}{the site}')
+    expect(tex).not.toContain('[the site][ref]')
+  })
+
+  // Appending a part's own definition back to itself must be inert: a
+  // duplicate `definition` node serialises to the empty string (serialize.ts's
+  // `case 'definition'`). This proves the page a project produces when every
+  // part is already self-contained is exactly what it would have been without
+  // project-wide definitions at all. (Retargeted from a footnote example:
+  // footnoteDefinition is no longer collected by `sharedDefinitions` at all —
+  // see definitions.ts — so it can no longer be duplicated by injection, and
+  // is no longer a useful example of this inertness property. Footnotes still
+  // resolve locally within their own part, unaffected by this test.)
+  it('adds nothing to the page when every part already defines its own link', () => {
+    const { tex } = convertProject(
+      [
+        part('01-a.md', '# A\n\nSee [ref A][a].\n\n[a]: https://a.example\n', 'main'),
+        part('02-b.md', '# B\n\nSee [ref B][b].\n\n[b]: https://b.example\n', 'main'),
+      ],
+      book,
+    )
+    // `\href{...}` count, not a raw URL count: the book preset's
+    // `footnoteUrls` also repeats a link's target in a footnote by design
+    // (see serialize.ts's `#link`), which is unrelated to definition
+    // duplication and would make a raw URL count of 1 a false failure.
+    expect(tex.match(/\\href\{https:\/\/a\.example\}/g)).toHaveLength(1)
+    expect(tex.match(/\\href\{https:\/\/b\.example\}/g)).toHaveLength(1)
+    expect(tex).not.toContain('[a]:')
+    expect(tex).not.toContain('[b]:')
+  })
+
+  // The Critical review finding this pin exists for: a footnoteDefinition is
+  // a CONTAINER, so injecting one at the top of a part's body absorbs any
+  // indented block that body opens with as the footnote's own continuation —
+  // moving content from one chapter into another footnote, with no malformed
+  // input required. Reproduction as measured: Part A defines a footnote; Part
+  // B's body opens with an indented code block.
+  it('never absorbs another chapter’s indented body into an injected footnote', () => {
+    const { tex } = convertProject(
+      [
+        part('01-a.md', '# Alpha\n\nText[^a]\n\n[^a]: first line\n', 'main'),
+        part('02-b.md', '    genuinely indented code block\n\nAfter code.\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex).toContain('\\begin{Verbatim}')
+    expect(tex).toContain('genuinely indented code block')
+    const footnoteMatch = tex.match(/\\footnote\{([^}]*)\}/)
+    expect(footnoteMatch?.[1]).not.toContain('genuinely indented')
+  })
+
+  // Review finding: appending shared definitions to the END of a part's
+  // source is swallowed whole when that part ends inside an unterminated
+  // construct — an unclosed ``` fence consumes to end-of-file, so the
+  // appended `[ref]: ...` definition line is printed as literal text inside
+  // the reader's code block instead of resolving invisibly. Placing the
+  // definitions at the TOP of the body instead means nothing earlier in the
+  // file can swallow them.
+  it('never prints a definition appended after an unclosed fence in another part', () => {
+    const { tex } = convertProject(
+      [
+        part('01-a.md', '# A\n\nSee [the site][ref].\n\n```\nunclosed fence\n', 'main'),
+        part('02-b.md', '# B\n\n[ref]: https://example.com\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex).not.toContain('[ref]:')
+  })
+})
+
 describe('matter divisions', () => {
   it('opens main matter before the body when the document declares no parts', () => {
     const { tex } = convert('# A Chapter\n', cfg({ character: 'book' }))
@@ -138,5 +268,55 @@ describe('matter divisions', () => {
     expect(tex).not.toContain('\\frontmatter')
     expect(tex).not.toContain('\\mainmatter')
     expect(tex).not.toContain('\\backmatter')
+  })
+})
+
+/**
+ * A DELIBERATE change from pre-branch behaviour, pinned here because nothing
+ * else pins it.
+ *
+ * Before this branch, `convert('# H\n\n![[cover.png]]\n', …)` emitted the embed
+ * as escaped literal text — galley had never heard of `![[…]]`. It now emits a
+ * real figure, because a chapter pasted out of Obsidian into the single-document
+ * editor should draw its pictures rather than print their filenames.
+ *
+ * The transform that does this moved OFF `parseMarkdown` and onto the
+ * conversion path (see `document.ts` and `markdown/pm/roundtrip.test.ts`), so
+ * this behaviour now rests on `convert` applying it explicitly. Delete that call
+ * and nothing else in the suite notices — the mutation-tested structure
+ * guardrail contains no wikilink. Hence this test.
+ */
+describe('Obsidian embeds in a single document', () => {
+  it('draws a figure for an embed rather than printing its filename', () => {
+    const { tex, images, diagnostics } = convert('# H\n\n![[cover.png]]\n', cfg())
+    expect(tex).toContain(
+      '\\includegraphics[width=\\linewidth,keepaspectratio]{cover.png}',
+    )
+    expect(images).toEqual(['cover.png'])
+    expect(diagnostics).toEqual([])
+  })
+
+  it('reports the embed as a missing figure when its bytes are absent', () => {
+    const { tex, diagnostics } = convert('![[cover.png]]\n', cfg(), new Set<string>())
+    expect(tex).toContain('[Figure not included:')
+    expect(diagnostics.map((d) => d.kind)).toEqual(['image-unsupported'])
+  })
+
+  // The pipe on an Obsidian embed is a display width in pixels, not alt text.
+  // Reading it as alt text put a spurious `\caption{400}` under every sized
+  // figure in a real vault.
+  it('gives a sized embed no caption', () => {
+    const { tex } = convert('![[cover.png|400]]\n', cfg())
+    expect(tex).toContain('\\includegraphics')
+    expect(tex).not.toContain('\\caption')
+  })
+
+  // `![[Appendix A]]` transcludes a note. Reported as a bad image format, it
+  // named the wrong cause entirely — in the exact case folder projects exist
+  // for. It is not an image reference, so it raises no image diagnostic.
+  it('raises no image diagnostic for a note transclusion', () => {
+    const { tex, diagnostics } = convert('![[Appendix A]]\n', cfg())
+    expect(diagnostics).toEqual([])
+    expect(tex).not.toContain('Figure not included')
   })
 })

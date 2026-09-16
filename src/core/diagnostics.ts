@@ -28,6 +28,16 @@ export type DiagnosticKind =
   | 'structure-unlistable'
   /** Two root-level headings share the same text, so one setting governs both. */
   | 'structure-duplicate-heading'
+  /** A file's `galley:` block was present but not a mapping. */
+  | 'project-part-malformed'
+  /** `book.md` carried a `galley:` block, which does nothing there. */
+  | 'project-book-not-a-part'
+  /** A file in the book has no top-level heading, so it opens no chapter. */
+  | 'project-part-headingless'
+  /** A file in the book has more than one top-level heading. */
+  | 'project-part-multiple-headings'
+  /** A figure reference matched no file in the project. */
+  | 'project-figure-unresolved'
 
 export interface Diagnostic {
   kind: DiagnosticKind
@@ -35,6 +45,11 @@ export interface Diagnostic {
   message: string
   /** The offending source fragment, where quoting it helps. */
   detail?: string
+  /**
+   * Project-relative path of the file this concerns, when one file owns it.
+   * A single document has no such path and omits it.
+   */
+  file?: string
 }
 
 /**
@@ -46,11 +61,16 @@ export class DiagnosticCollector {
   readonly #seen = new Set<string>()
   readonly #items: Diagnostic[] = []
 
-  add(kind: DiagnosticKind, message: string, detail?: string): void {
-    const key = `${kind}\u0000${detail ?? ''}`
+  add(kind: DiagnosticKind, message: string, detail?: string, file?: string): void {
+    const key = `${kind}\u0000${detail ?? ''}\u0000${file ?? ''}`
     if (this.#seen.has(key)) return
     this.#seen.add(key)
-    this.#items.push(detail === undefined ? { kind, message } : { kind, message, detail })
+    this.#items.push({
+      kind,
+      message,
+      ...(detail === undefined ? {} : { detail }),
+      ...(file === undefined ? {} : { file }),
+    })
   }
 
   /** How many times a kind was raised, counting duplicates as one. */

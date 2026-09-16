@@ -109,3 +109,62 @@ it('does not re-serialise non-canonical Markdown back to its own source', () => 
   const reserialized = serializeToMarkdown(mdastToPm(bodyTree(parseMarkdown(source))))
   expect(reserialized).not.toBe(source)
 })
+
+/**
+ * The editor must not rewrite the author's own files.
+ *
+ * A folder project opens Markdown that lives in the writer's vault, so
+ * `MarkdownEditor.tsx`'s route — parse, `mdastToPm`, edit, `serializeToMarkdown`
+ * — writes straight back over their file. Obsidian's `![[…]]` embed is not part
+ * of CommonMark, so nothing downstream can put it back once it is gone: opening
+ * a chapter and typing one character has to leave it as written.
+ *
+ * Measured with the embed transform running inside `parseMarkdown`, which is
+ * what this pins against:
+ *
+ *     "Text ![[diagram.png]] more\n" -> "Text  more\n"        <- DELETED
+ *     "![[diagram.png]]\n"           -> "![](diagram.png)\n"
+ *     "![[diagram.png|400]]\n"       -> "![400](diagram.png)\n"
+ *     "![[Appendix A]]\n"            -> "![](<Appendix A>)\n"
+ *
+ * The inline case lost the embed outright, because `mdastToPm` returns null for
+ * an `image` inside a paragraph. The transform therefore belongs to the
+ * conversion path (`latex/document.ts`) and never to the parse that every
+ * keystroke runs.
+ *
+ * ## The one difference that remains, and why it is not this branch's
+ *
+ * `remark-stringify` escapes an opening bracket anywhere in prose, so the
+ * round trip returns `!\[\[diagram.png]]` rather than `![[diagram.png]]`. That
+ * is not the embed transform and not new here: `[[some note]]` becomes
+ * `\[\[some note]]` and `Brackets [not a link] here` becomes
+ * `Brackets \[not a link] here` on this branch and before it, with
+ * `pm/serialize.ts` untouched throughout. It is pinned below rather than
+ * hidden, because the escaped form does NOT render as an embed in Obsidian —
+ * a separate defect, in a separate file, on the editor's serialiser.
+ *
+ * The assertion that matters here is the second one: unescaping brackets must
+ * return the source exactly. Nothing is deleted and nothing is rewritten into
+ * another syntax.
+ */
+describe('the editor carries Obsidian embeds through unrewritten', () => {
+  const roundTrip = (source: string): string =>
+    serializeToMarkdown(mdastToPm(bodyTree(parseMarkdown(source))))
+
+  it.each([
+    [
+      'an inline embed',
+      'Text ![[diagram.png]] more\n',
+      'Text !\\[\\[diagram.png]] more\n',
+    ],
+    ['an embed alone in a paragraph', '![[diagram.png]]\n', '!\\[\\[diagram.png]]\n'],
+    ['a sized embed', '![[diagram.png|400]]\n', '!\\[\\[diagram.png|400]]\n'],
+    ['a note transclusion', '![[Appendix A]]\n', '!\\[\\[Appendix A]]\n'],
+  ])('keeps %s', (_name, source, escaped) => {
+    const out = roundTrip(source)
+    // Character for character, bar the bracket escapes documented above.
+    expect(out.replace(/\\(?=[[\]])/g, '')).toBe(source)
+    // And exactly what those escapes are, so a change to them is never silent.
+    expect(out).toBe(escaped)
+  })
+})

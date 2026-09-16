@@ -7,8 +7,12 @@ import {
   DEFAULT_PART,
   headingText,
   type PartSpec,
+  parseWritableFrontmatter,
+  partSpecFields,
   readStructure,
+  resolvePart,
   roleRank,
+  writeFrontmatterKey,
   writeStructure,
 } from './structure'
 
@@ -346,5 +350,107 @@ describe('canWriteStructure', () => {
     // What we expect them to agree ON, so a fixture that accidentally pins
     // both sides to the same wrong answer still fails.
     expect(canWriteStructure(source)).toBe(writable)
+  })
+})
+
+describe('shared guards', () => {
+  it('exposes the writability guard that canWriteStructure uses', () => {
+    // A duplicate key makes the document unparseable-for-rewrite.
+    expect(parseWritableFrontmatter('a: 1\na: 2')).toBeNull()
+    expect(parseWritableFrontmatter('title: A book')).not.toBeNull()
+    expect(parseWritableFrontmatter(null)).not.toBeNull()
+  })
+
+  it('exposes the role defaulting readStructure uses', () => {
+    expect(resolvePart({})).toEqual({ role: 'main', numbered: true, listed: true })
+    expect(resolvePart({ role: 'front' })).toEqual({
+      role: 'front',
+      numbered: false,
+      listed: true,
+    })
+  })
+
+  // partSpecFields is the inverse of resolvePart. Pinning the round trip is
+  // what stops the two drifting: a field the writer omits must be one the
+  // reader defaults back to the same value.
+  it('round-trips every PartSpec through partSpecFields and resolvePart', () => {
+    const specs: PartSpec[] = [
+      { role: 'main', numbered: true, listed: true },
+      { role: 'front', numbered: false, listed: true },
+      { role: 'front', numbered: true, listed: true },
+      { role: 'back', numbered: false, listed: false },
+      { role: 'main', numbered: true, listed: true, tocTitle: 'Short' },
+    ]
+    for (const spec of specs) {
+      expect(resolvePart(partSpecFields(spec))).toEqual(spec)
+    }
+  })
+
+  it('omits fields that match the role default', () => {
+    expect(partSpecFields({ role: 'front', numbered: false, listed: true })).toEqual({
+      role: 'front',
+    })
+    expect(partSpecFields({ role: 'main', numbered: true, listed: true })).toEqual({
+      role: 'main',
+    })
+  })
+})
+
+describe('writeFrontmatterKey', () => {
+  it('adds a key to a document with no frontmatter', () => {
+    expect(writeFrontmatterKey('# C\n', 'x', { a: 1 })).toContain('x:')
+  })
+
+  it('preserves other keys and comments', () => {
+    const out = writeFrontmatterKey('---\n# note\ntitle: T\n---\n\n# C\n', 'x', { a: 1 })
+    expect(out).toContain('# note')
+    expect(out).toContain('title: T')
+  })
+
+  // The v2.1.0 "Fix 4" case, at this level. A frontmatter that is only a
+  // comment parses with `contents === null`, so the comment sits on the
+  // DOCUMENT rather than on a key. Adding a key makes contents a map; removing
+  // it again leaves an EMPTY map, which `yaml` stringifies as `# a comment\n{}`
+  // — and that `{}` once shipped in a writer's manuscript.
+  //
+  // The add step is load-bearing. Calling `delete` on a null-contents document
+  // THROWS (yaml@2.9: "Expected a YAML collection as document contents"), the
+  // backstop catches it, and the source comes back untouched — so a version of
+  // this test that skips the add asserts against its own unmodified input and
+  // passes against a `writeFrontmatterKey` that strips nothing at all.
+  it('strips the empty-document token but keeps a document-level comment', () => {
+    const added = writeFrontmatterKey('---\n# a comment\n---\n\n# C\n', 'x', { a: 1 })
+    const out = writeFrontmatterKey(added, 'x', null)
+    expect(out).toContain('# a comment')
+    expect(out).not.toContain('{}')
+    expect(out).toContain('# C')
+  })
+
+  // Verified against yaml@2.9: a comment binds to the node that FOLLOWS it, so
+  // `# note` here belongs to `x`. It therefore goes when `x` goes. Rescuing it
+  // onto the document would move the writer's own words above an unrelated key,
+  // where they describe something they were never written about — and this
+  // routine is shared with `writeStructure`, whose shipped behaviour is this.
+  it('lets a comment go with the key it was written above', () => {
+    const out = writeFrontmatterKey(
+      '---\ntitle: T\n# note\nx: 1\n---\n\n# C\n',
+      'x',
+      null,
+    )
+    expect(out).toContain('title: T')
+    expect(out).not.toContain('# note')
+  })
+
+  it('drops the fence entirely when nothing is left', () => {
+    expect(writeFrontmatterKey('---\nx: 1\n---\n\n# C\n', 'x', null)).toBe('# C\n')
+  })
+
+  it('returns the source unchanged when the frontmatter cannot be rewritten', () => {
+    const src = '---\na: 1\na: 2\n---\n\n# C\n'
+    expect(writeFrontmatterKey(src, 'x', { a: 1 })).toBe(src)
+  })
+
+  it('returns the source unchanged when removing a key from no frontmatter', () => {
+    expect(writeFrontmatterKey('# C\n', 'x', null)).toBe('# C\n')
   })
 })
