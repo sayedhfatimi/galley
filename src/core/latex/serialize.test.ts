@@ -763,4 +763,47 @@ describe('serializeParts', () => {
       }),
     )
   })
+
+  it("does not let a spec-less document part's structure block clobber a project part's own spec (Finding 1)", () => {
+    // A project part carries its own spec via `galley:`/`#prepareProjectPart`
+    // — here front matter, deliberately UNNUMBERED. A document part with no
+    // spec of its own is governed by ITS `structure:` block instead, via
+    // `#prepareDocumentStructure`, which here names a heading of the SAME
+    // TEXT as the project part's and assigns it `role: main` (NUMBERED by
+    // role default) — chosen so an overwrite would be visible in the output,
+    // not just in an internal map.
+    //
+    // `#prepareDocumentStructure` must scope its duplicate-title scan and its
+    // `#specByNode` fill to its OWN tree's headings, never to the accumulated
+    // `#parts` set that already contains the project part's heading — else
+    // the document's `structure:` entry would match by text and silently
+    // renumber the project part's chapter, and the duplicate-title scan would
+    // raise `structure-duplicate-heading` against a project file.
+    const result = serializeParts(
+      [
+        {
+          tree: parseMarkdown('# Same Title\n'),
+          spec: { role: 'front', numbered: false, listed: true },
+          path: 'project-part.md',
+        },
+        {
+          tree: parseMarkdown(
+            '---\nstructure:\n  Same Title: { role: main }\n---\n\n# Same Title\n',
+          ),
+          // No `spec` — a single document governed by its own `structure:`.
+        },
+      ],
+      book,
+    )
+
+    // The project part's own spec must survive: exactly one STARRED
+    // (unnumbered) \chapter for the project part, and exactly one plain
+    // (numbered) \chapter for the document's own heading — never two of
+    // either, which is what an overwrite in either direction would produce.
+    expect(result.body.match(/\\chapter\*\{Same Title\}/g)).toHaveLength(1)
+    expect(result.body.match(/\\chapter\{Same Title\}/g)).toHaveLength(1)
+    expect(result.diagnostics.map((d) => d.kind)).not.toContain(
+      'structure-duplicate-heading',
+    )
+  })
 })

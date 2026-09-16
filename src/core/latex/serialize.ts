@@ -191,7 +191,7 @@ class Serializer {
     // carries the spec its `galley:` block resolved to (see project/types.ts),
     // and a single document is always exactly one part.
     for (const part of parts) {
-      if (part.spec) this.#prepareProjectPart(part.tree, part.spec, part.path ?? '')
+      if (part.spec) this.#prepareProjectPart(part.tree, part.spec, part.path)
       else this.#prepareDocumentStructure(part.tree)
     }
 
@@ -218,7 +218,7 @@ class Serializer {
    * it. No heading-text lookup is involved, so two files may hold identically
    * titled chapters and still be set apart.
    */
-  #prepareProjectPart(tree: Root, spec: PartSpec, path: string): void {
+  #prepareProjectPart(tree: Root, spec: PartSpec, path: string | undefined): void {
     const headings: Heading[] = []
     for (const node of tree.children) {
       if (node.type === 'heading' && node.depth === 1) headings.push(node)
@@ -290,15 +290,34 @@ class Serializer {
    * nothing" is only knowable once every heading has been seen.
    */
   #prepareDocumentStructure(tree: Root): void {
-    // Collected unconditionally — not just when a `structure:` block exists —
-    // because this set is also what `#heading` uses to decide whether a
-    // depth-1 node is a part at all. See the field comment.
+    // Collected into a LOCAL array, not just added to `#parts`: `#parts` is
+    // shared across every part `runParts` walks, and by the time a later
+    // document part is prepared it holds every heading a project part before
+    // it already handed its own spec via `#prepareProjectPart`. Both loops
+    // below must scan only THIS tree's own headings — scanning `#parts`
+    // instead would let this document's `structure:` block overwrite a
+    // project heading's spec in `#specByNode`, and let its duplicate-title
+    // scan raise `structure-duplicate-heading` against a project file's
+    // heading it has no business seeing. Still added to `#parts` too: that
+    // set is also what `#heading` uses to decide whether a depth-1 node is a
+    // part at all. See the field comment.
+    const own: Heading[] = []
     for (const node of tree.children) {
-      if (node.type === 'heading' && node.depth === 1) this.#parts.add(node)
+      if (node.type === 'heading' && node.depth === 1) {
+        own.push(node)
+        this.#parts.add(node)
+      }
     }
 
     this.#structure = readStructure(frontmatterData(tree))
-    if (this.#structure.size === 0) return
+    if (this.#structure.size === 0) {
+      // Assigned on every path through this method, including this early
+      // return: leaving the previous document's `#duplicatedTitles` in place
+      // would let a duplicated title from an earlier part suppress a
+      // legitimate `structure-order` notice on this one.
+      this.#duplicatedTitles = new Set()
+      return
+    }
 
     const titles = new Set<string>()
     // Two root headings with identical text share one PartSpec, because parts
@@ -308,7 +327,7 @@ class Serializer {
     // the matter state machine somewhere the writer never intended. Flagged
     // here rather than left for the reader to notice in the contents page.
     const duplicated = new Set<string>()
-    for (const node of this.#parts) {
+    for (const node of own) {
       const title = headingText(node)
       if (titles.has(title)) duplicated.add(title)
       titles.add(title)
@@ -351,7 +370,7 @@ class Serializer {
     // `structure-unmatched` has just reported does nothing — and the node map
     // is what carries that fact on to `#resolveMatterOwnership`, which is now
     // the single place matter ownership is decided for both modes.
-    for (const node of this.#parts) {
+    for (const node of own) {
       const spec = this.#structure.get(headingText(node))
       if (spec) this.#specByNode.set(node, spec)
     }
