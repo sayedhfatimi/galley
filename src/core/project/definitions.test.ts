@@ -18,8 +18,18 @@ describe('sharedDefinitions', () => {
     expect(sharedDefinitions(['[ref]: https://e.com\n'])).toBe('[ref]: https://e.com')
   })
 
-  it('collects a footnote definition', () => {
-    expect(sharedDefinitions(['[^a]: the note\n'])).toContain('[^a]: the note')
+  it('does not collect a footnote definition', () => {
+    expect(sharedDefinitions(['[^a]: the note\n'])).toBe('')
+  })
+
+  // The defect this exclusion exists to prevent. A footnoteDefinition is a
+  // CONTAINER: injected at the top of a body that opens with indented content,
+  // it absorbs that content as its own continuation, moving it into another
+  // chapter. A leaf `definition` leaves it alone.
+  it('never lets an injected definition absorb the body that follows it', () => {
+    const body = '    indented code\n\nAfter.\n'
+    const injected = `${sharedDefinitions(['[ref]: https://e.com\n', '[^a]: note\n'])}\n\n${body}`
+    expect(types(injected)).toContain('code')
   })
 
   it('collects across every part', () => {

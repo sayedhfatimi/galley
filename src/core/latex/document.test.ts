@@ -177,25 +177,51 @@ describe('convertProject', () => {
     expect(tex).not.toContain('[the site][ref]')
   })
 
-  // Appending a part's own definitions back to itself must be inert: a
-  // duplicate `definition`/`footnoteDefinition` node serialises to the empty
-  // string (serialize.ts's `case 'definition'`). This proves the page a
-  // project produces when every part is already self-contained is exactly
-  // what it would have been without project-wide definitions at all.
-  it('adds nothing to the page when every part already defines its own footnote', () => {
+  // Appending a part's own definition back to itself must be inert: a
+  // duplicate `definition` node serialises to the empty string (serialize.ts's
+  // `case 'definition'`). This proves the page a project produces when every
+  // part is already self-contained is exactly what it would have been without
+  // project-wide definitions at all. (Retargeted from a footnote example:
+  // footnoteDefinition is no longer collected by `sharedDefinitions` at all —
+  // see definitions.ts — so it can no longer be duplicated by injection, and
+  // is no longer a useful example of this inertness property. Footnotes still
+  // resolve locally within their own part, unaffected by this test.)
+  it('adds nothing to the page when every part already defines its own link', () => {
     const { tex } = convertProject(
       [
-        part('01-a.md', '# A\n\nOne.[^a]\n\n[^a]: Note A\n', 'main'),
-        part('02-b.md', '# B\n\nTwo.[^b]\n\n[^b]: Note B\n', 'main'),
+        part('01-a.md', '# A\n\nSee [ref A][a].\n\n[a]: https://a.example\n', 'main'),
+        part('02-b.md', '# B\n\nSee [ref B][b].\n\n[b]: https://b.example\n', 'main'),
       ],
       book,
     )
-    expect(tex.match(/Note A/g)).toHaveLength(1)
-    expect(tex.match(/Note B/g)).toHaveLength(1)
-    expect(tex).not.toContain('[^a]')
-    expect(tex).not.toContain('[^b]')
-    expect(tex).not.toContain('[^a]: Note A')
-    expect(tex).not.toContain('[^b]: Note B')
+    // `\href{...}` count, not a raw URL count: the book preset's
+    // `footnoteUrls` also repeats a link's target in a footnote by design
+    // (see serialize.ts's `#link`), which is unrelated to definition
+    // duplication and would make a raw URL count of 1 a false failure.
+    expect(tex.match(/\\href\{https:\/\/a\.example\}/g)).toHaveLength(1)
+    expect(tex.match(/\\href\{https:\/\/b\.example\}/g)).toHaveLength(1)
+    expect(tex).not.toContain('[a]:')
+    expect(tex).not.toContain('[b]:')
+  })
+
+  // The Critical review finding this pin exists for: a footnoteDefinition is
+  // a CONTAINER, so injecting one at the top of a part's body absorbs any
+  // indented block that body opens with as the footnote's own continuation —
+  // moving content from one chapter into another footnote, with no malformed
+  // input required. Reproduction as measured: Part A defines a footnote; Part
+  // B's body opens with an indented code block.
+  it('never absorbs another chapter’s indented body into an injected footnote', () => {
+    const { tex } = convertProject(
+      [
+        part('01-a.md', '# Alpha\n\nText[^a]\n\n[^a]: first line\n', 'main'),
+        part('02-b.md', '    genuinely indented code block\n\nAfter code.\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex).toContain('\\begin{Verbatim}')
+    expect(tex).toContain('genuinely indented code block')
+    const footnoteMatch = tex.match(/\\footnote\{([^}]*)\}/)
+    expect(footnoteMatch?.[1]).not.toContain('genuinely indented')
   })
 
   // Review finding: appending shared definitions to the END of a part's
