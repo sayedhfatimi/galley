@@ -34,6 +34,18 @@ describe('figureName', () => {
     expect(classifyImage(name)).toMatchObject({ kind: 'supported' })
   })
 
+  /**
+   * Pins that the fingerprint is taken over the PATH, not over the flattened
+   * string. Mutating `fingerprint(relativePath)` to `fingerprint(flattened)`
+   * passes every other test here: the flatten collapses `/` and `\\` to the
+   * same dash, so two genuinely different paths would then fingerprint
+   * identically and collide on one engine-side name. Path identity is the
+   * whole premise of this module.
+   */
+  it('fingerprints the path, not the flattened name', () => {
+    expect(figureName('a/b.png')).not.toBe(figureName('a\\b.png'))
+  })
+
   it('produces a name \\includegraphics can take verbatim', () => {
     // graphicx tokenises its argument: no spaces, braces, #, %, _ or &.
     expect(figureName('a b/c&d#e.png')).toMatch(/^[A-Za-z0-9.-]+$/)

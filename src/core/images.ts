@@ -79,7 +79,16 @@ export function classifyImage(url: string): ImageClassification {
   return { kind: 'supported', name, extension }
 }
 
-function isSupported(ext: string): ext is SupportedImageExtension {
+/**
+ * Whether an extension — lower-cased, leading dot included — is one galley can
+ * typeset.
+ *
+ * Exported because this module owns the answer. `project/read.ts` needs the
+ * same question answered when it decides which of a folder's files are the
+ * book's figures, and a second copy of the membership test there is exactly
+ * the drift this module's one-name-chosen-once rule exists to prevent.
+ */
+export function isSupported(ext: string): ext is SupportedImageExtension {
   return (SUPPORTED_IMAGE_EXTENSIONS as readonly string[]).includes(ext)
 }
 

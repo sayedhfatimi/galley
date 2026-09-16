@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { presetFor } from '../config'
+import { buildFigureResolver, figureName } from '../project/figures'
 import { readProject } from '../project/read'
 import { convert, convertProject } from './document'
 
@@ -212,6 +213,68 @@ describe('notes never reach the page', () => {
     ])
     expect(convertProject(withNotes.parts, config()).tex).toBe(
       convertProject(withoutNotes.parts, config()).tex,
+    )
+  })
+})
+
+/**
+ * The three pieces of figure handling, composed the way the application
+ * composes them: `readProject` finds the files, `buildFigureResolver` is built
+ * from the figure paths it found, and `convertProject` is handed the resolver.
+ *
+ * Nothing else in the suite runs all three together. `read.test.ts` checks what
+ * `readProject` collects, `figures.test.ts` checks resolution in isolation, and
+ * `serialize.test.ts` hands a hand-built resolver to `serializeParts` — so a
+ * mismatch at either seam (figures collected under one spelling and resolved
+ * under another, or the resolver never reaching the serialiser) would leave
+ * every one of those tests green.
+ *
+ * The figure deliberately lives in a chapter's own subfolder and is referenced
+ * by bare name, which is how Obsidian writes it: resolution has to go through
+ * the referring file's directory, and the emitted name has to be `figureName`
+ * of the RESOLVED path rather than of the reference as written.
+ */
+describe('a project figure reaches the page under its resolved name', () => {
+  const FIGURE = 'chapters/03-illusion/diagram.png'
+
+  const withFigure = () => [
+    {
+      path: 'chapters/03-illusion/chapter.md',
+      source:
+        '---\ngalley:\n  role: main\n---\n\n# The Illusion of Truth\n\n![[diagram.png]]\n',
+    },
+  ]
+
+  it('emits figureName of the resolved path, not of the reference', () => {
+    const project = readProject(withFigure(), [FIGURE])
+    expect(project.figures).toEqual([FIGURE])
+
+    const resolver = buildFigureResolver(project.figures)
+    const result = convertProject(project.parts, config(), undefined, resolver)
+
+    const expected = figureName(FIGURE)
+    expect(result.images).toEqual([expected])
+    expect(result.tex).toContain(
+      `\\includegraphics[width=\\linewidth,keepaspectratio]{${expected}}`,
+    )
+    // The reference as written resolves to a different name entirely, which is
+    // what makes this assertion discriminating rather than tautological.
+    expect(expected).not.toBe(figureName('diagram.png'))
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it('diagnoses a figure the project does not hold, naming the chapter', () => {
+    const project = readProject(withFigure(), [])
+    const resolver = buildFigureResolver(project.figures)
+    const result = convertProject(project.parts, config(), undefined, resolver)
+
+    expect(result.images).toEqual([])
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        kind: 'project-figure-unresolved',
+        detail: 'diagram.png',
+        file: 'chapters/03-illusion/chapter.md',
+      }),
     )
   })
 })

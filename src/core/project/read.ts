@@ -10,7 +10,7 @@
 
 import type { GalleyConfig, Metadata } from '../config'
 import { DiagnosticCollector } from '../diagnostics'
-import { SUPPORTED_IMAGE_EXTENSIONS } from '../images'
+import { isSupported } from '../images'
 import { extractFrontmatter, frontmatterData } from '../markdown/frontmatter'
 import { parseMarkdown } from '../markdown/parse'
 import { readBookConfig } from './config'
@@ -36,10 +36,14 @@ function hidden(path: string): boolean {
   return path.split('/').some((segment) => segment.startsWith('.'))
 }
 
+/**
+ * `images.ts` decides what galley can typeset; this only extracts the
+ * extension to ask it. Restating the membership test here would be a second
+ * copy of a fact that module owns.
+ */
 function isImage(path: string): boolean {
   const dot = path.lastIndexOf('.')
-  const extension = dot > 0 ? path.slice(dot).toLowerCase() : ''
-  return (SUPPORTED_IMAGE_EXTENSIONS as readonly string[]).includes(extension)
+  return isSupported(dot > 0 ? path.slice(dot).toLowerCase() : '')
 }
 
 export function readProject(

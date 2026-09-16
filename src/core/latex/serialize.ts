@@ -760,6 +760,13 @@ class Serializer {
    * is overridden, and only in a project, where identity is the file's path
    * rather than its basename — see `src/core/project/figures.ts`.
    */
+  // `unresolved` and the two `classifyImage` rejections are structurally
+  // mutually exclusive, which is why `#unrenderable` can branch on them as a
+  // flat chain rather than weighing one against another. The resolver runs
+  // ONLY where `classified.kind` is already `supported`: a remote URL or an
+  // unsupported format returns before it, so neither can also come back
+  // unresolved, and `unresolved` can only ever mean "a name galley could have
+  // typeset, for which the project holds no file".
   #resolveImage(url: string): ImageClassification | { kind: 'unresolved' } {
     const classified = classifyImage(url)
     if (classified.kind !== 'supported' || this.#resolver === undefined) return classified
@@ -791,6 +798,9 @@ class Serializer {
    * gap: the reader sees exactly where the image belongs and why it is absent.
    */
   #unrenderable(alt: string, url: string): string {
+    // One kind, one cause. See `#resolveImage`: `unresolved` cannot coexist
+    // with `remote` or `unsupported-format`, so the first matching branch is
+    // also the only true one and the order below carries no precedence.
     const image = this.#resolveImage(url)
     if (image.kind === 'unresolved') {
       this.#diagnostics.add(
