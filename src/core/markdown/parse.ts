@@ -15,7 +15,6 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
-import { applyWikilinkEmbeds } from './wikilink'
 
 const processor = unified()
   .use(remarkParse)
@@ -29,11 +28,15 @@ const processor = unified()
  * This never throws on unrecognised content: anything outside the supported
  * grammar is carried through as literal text, which is what makes "conversion
  * to LaTeX cannot fail" true.
+ *
+ * **Parsing only.** No transform runs here, and Obsidian's `![[…]]` embed in
+ * particular is NOT rewritten — see `applyWikilinkEmbeds`, which
+ * `latex/document.ts` applies on the conversion path instead. This function is
+ * also the WYSIWYG editor's parse (`MarkdownEditor.tsx` parses, converts to
+ * ProseMirror, and serialises back over the author's own file), so anything
+ * rewritten here is written back into a folder project's vault on the next
+ * keystroke. `pm/roundtrip.test.ts` pins that.
  */
 export function parseMarkdown(source: string): Root {
-  const tree = processor.parse(source) as Root
-  // An explicit transform, not a `.use()` plugin: `.parse()` runs the parser
-  // only, so a plugin's transformer would never execute.
-  applyWikilinkEmbeds(tree)
-  return tree
+  return processor.parse(source) as Root
 }

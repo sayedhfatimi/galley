@@ -13,6 +13,7 @@ import type { Diagnostic } from '../diagnostics'
 import { extractFrontmatter, hasFrontmatter } from '../markdown/frontmatter'
 import { parseMarkdown } from '../markdown/parse'
 import { joinFrontmatter, splitFrontmatter } from '../markdown/split'
+import { applyWikilinkEmbeds } from '../markdown/wikilink'
 import { sharedDefinitions } from '../project/definitions'
 import type { FigureResolver, ProjectPart } from '../project/types'
 import { buildPreamble } from './preamble'
@@ -91,6 +92,13 @@ export function convert(
   available?: ReadonlySet<string>,
 ): ConvertResult {
   const tree = parseMarkdown(source)
+  // Applied HERE, not in `parseMarkdown`, and applied immediately before
+  // serialising. `parseMarkdown` is also the rich editor's parse, and the
+  // editor serialises its tree straight back over the author's file — so an
+  // embed rewritten at parse time is an embed DESTROYED in a folder project's
+  // vault (measured: the inline case vanished entirely). Conversion is the one
+  // path that wants the rewrite, so conversion is where it runs.
+  applyWikilinkEmbeds(tree)
   const result = serializeParts([{ tree }], config, available)
   return {
     tex: assemble(config, result),
@@ -133,11 +141,13 @@ export function convertProject(
   }
 
   const result = serializeParts(
-    parts.map((part) => ({
-      tree: parseMarkdown(withDefinitions(part.source)),
-      spec: part.spec,
-      path: part.path,
-    })),
+    parts.map((part) => {
+      // Same rule as `convert`: the embed rewrite is conversion's, never the
+      // parser's, and it runs immediately before serialising.
+      const tree = parseMarkdown(withDefinitions(part.source))
+      applyWikilinkEmbeds(tree)
+      return { tree, spec: part.spec, path: part.path }
+    }),
     config,
     available,
     resolver,

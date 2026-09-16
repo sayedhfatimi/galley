@@ -1,10 +1,24 @@
 import type { Paragraph, Root } from 'mdast'
 import { describe, expect, it } from 'vitest'
 import { parseMarkdown } from './parse'
+import { applyWikilinkEmbeds } from './wikilink'
+
+/**
+ * Parse, then transform — the order the conversion path uses.
+ *
+ * `parseMarkdown` deliberately does NOT apply this transform: it is also the
+ * rich editor's parse, and an embed rewritten there is written back over the
+ * author's own vault file. `latex/document.ts` applies it on the way to LaTeX
+ * and nowhere else, so these tests call it the same way.
+ */
+function transformed(source: string): Root {
+  const tree: Root = parseMarkdown(source)
+  applyWikilinkEmbeds(tree)
+  return tree
+}
 
 function firstParagraph(source: string): Paragraph {
-  const tree: Root = parseMarkdown(source)
-  return tree.children.find((n) => n.type === 'paragraph') as Paragraph
+  return transformed(source).children.find((n) => n.type === 'paragraph') as Paragraph
 }
 
 describe('wikilink embeds', () => {
@@ -42,7 +56,7 @@ describe('wikilink embeds', () => {
   })
 
   it('leaves a fenced code block alone', () => {
-    const tree = parseMarkdown('```\n![[diagram.png]]\n```\n')
+    const tree = transformed('```\n![[diagram.png]]\n```\n')
     expect(tree.children[0]).toMatchObject({ type: 'code' })
   })
 

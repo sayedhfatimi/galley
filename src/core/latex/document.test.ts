@@ -270,3 +270,35 @@ describe('matter divisions', () => {
     expect(tex).not.toContain('\\backmatter')
   })
 })
+
+/**
+ * A DELIBERATE change from pre-branch behaviour, pinned here because nothing
+ * else pins it.
+ *
+ * Before this branch, `convert('# H\n\n![[cover.png]]\n', …)` emitted the embed
+ * as escaped literal text — galley had never heard of `![[…]]`. It now emits a
+ * real figure, because a chapter pasted out of Obsidian into the single-document
+ * editor should draw its pictures rather than print their filenames.
+ *
+ * The transform that does this moved OFF `parseMarkdown` and onto the
+ * conversion path (see `document.ts` and `markdown/pm/roundtrip.test.ts`), so
+ * this behaviour now rests on `convert` applying it explicitly. Delete that call
+ * and nothing else in the suite notices — the mutation-tested structure
+ * guardrail contains no wikilink. Hence this test.
+ */
+describe('Obsidian embeds in a single document', () => {
+  it('draws a figure for an embed rather than printing its filename', () => {
+    const { tex, images, diagnostics } = convert('# H\n\n![[cover.png]]\n', cfg())
+    expect(tex).toContain(
+      '\\includegraphics[width=\\linewidth,keepaspectratio]{cover.png}',
+    )
+    expect(images).toEqual(['cover.png'])
+    expect(diagnostics).toEqual([])
+  })
+
+  it('reports the embed as a missing figure when its bytes are absent', () => {
+    const { tex, diagnostics } = convert('![[cover.png]]\n', cfg(), new Set<string>())
+    expect(tex).toContain('[Figure not included:')
+    expect(diagnostics.map((d) => d.kind)).toEqual(['image-unsupported'])
+  })
+})

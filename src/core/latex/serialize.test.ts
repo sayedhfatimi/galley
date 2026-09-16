@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type GalleyConfig, presetFor } from '../config'
 import { parseMarkdown } from '../markdown/parse'
+import { applyWikilinkEmbeds } from '../markdown/wikilink'
 import { buildFigureResolver, figureName } from '../project/figures'
 import { type SerializePart, serializeParts, serializeToLatex } from './serialize'
 
@@ -812,11 +813,19 @@ describe('serializeParts', () => {
 describe('project figures', () => {
   const book = presetFor('book')
   const resolver = buildFigureResolver(['ch1/diagram.png', 'ch3/diagram.png'])
-  const partOf = (path: string, source: string) => ({
-    tree: parseMarkdown(source),
-    spec: { role: 'main' as const, numbered: true, listed: true },
-    path,
-  })
+  // Mirrors `convertProject`: the parser no longer rewrites `![[…]]` — the
+  // conversion path does, immediately before serialising — so a test that
+  // feeds the serializer an embed has to apply the same transform the real
+  // caller does. See `markdown/pm/roundtrip.test.ts` for why it moved.
+  const partOf = (path: string, source: string) => {
+    const tree = parseMarkdown(source)
+    applyWikilinkEmbeds(tree)
+    return {
+      tree,
+      spec: { role: 'main' as const, numbered: true, listed: true },
+      path,
+    }
+  }
 
   it('names two same-named figures distinctly', () => {
     const result = serializeParts(
