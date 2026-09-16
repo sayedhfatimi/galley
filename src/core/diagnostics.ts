@@ -38,6 +38,8 @@ export type DiagnosticKind =
   | 'project-part-multiple-headings'
   /** A figure reference matched no file in the project. */
   | 'project-figure-unresolved'
+  /** Two chapters define the same link identifier with different targets. */
+  | 'project-definition-duplicate'
 
 export interface Diagnostic {
   kind: DiagnosticKind
