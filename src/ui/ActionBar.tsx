@@ -1,6 +1,7 @@
 import { Download, FileText, FolderOpen, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
+import type { GalleyConfig } from '@/core/config'
 import { ConfigDialog } from './ConfigDialog'
 import { LatexDialog } from './LatexDialog'
 import { ThemeToggle } from './ThemeToggle'
@@ -26,6 +27,9 @@ export interface ActionBarProps {
   canOpenProject: boolean
   onOpenProject: () => void
   onCloseProject: () => void
+  /** In project mode, the book's settings rather than the document's. */
+  projectConfig?: GalleyConfig
+  onProjectConfigChange?: (config: GalleyConfig) => void
 }
 
 export function ActionBar({
@@ -38,6 +42,8 @@ export function ActionBar({
   canOpenProject,
   onOpenProject,
   onCloseProject,
+  projectConfig,
+  onProjectConfigChange,
 }: ActionBarProps) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b bg-background/80 px-4 backdrop-blur">
@@ -88,7 +94,7 @@ export function ActionBar({
         </Button>
 
         <ButtonGroup>
-          <ConfigDialog />
+          <ConfigDialog config={projectConfig} onChange={onProjectConfigChange} />
           <Button size="sm" onClick={onRender} disabled={busy || !tex.trim()}>
             {busy ? (
               <Loader2 className="size-3.5 animate-spin" />

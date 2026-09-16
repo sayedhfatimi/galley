@@ -5,8 +5,12 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable'
+import type { GalleyConfig } from '@/core/config'
 import { convertProject } from '@/core/latex/document'
+import { writeMetadata } from '@/core/markdown/frontmatter'
+import { writeBookConfig } from '@/core/project/config'
 import { buildFigureResolver } from '@/core/project/figures'
+import { BOOK_FILE } from '@/core/project/read'
 import { Diagnostics } from '@/ui/Diagnostics'
 import { type EditorMode, EditorPane } from '@/ui/editor/EditorPane'
 import { type PaneSide, useStore } from '@/ui/lib/store'
@@ -32,13 +36,24 @@ import { useAutosave } from './useAutosave'
  * edit.
  */
 
-/** What the ActionBar needs to render or download this project. */
+/** What the ActionBar needs to render, download or configure this project. */
 export interface ProjectOutput {
   tex: string
   /** Engine names of the figures this book draws. */
   images: string[]
   /** Reads those figures' bytes from the folder, on demand. */
   loadImages: () => Promise<{ name: string; bytes: Uint8Array }[]>
+  /** The book's settings, from `book.md`. */
+  config: GalleyConfig
+  /**
+   * Changes them, and writes them back into `book.md`.
+   *
+   * Lifted rather than left in the dialog because the WRITE has to go through
+   * the same staleness-guarded autosave as any other file — `book.md` is a
+   * file in the author's folder like the rest, and a config change is an edit
+   * to it.
+   */
+  setConfig: (config: GalleyConfig) => void
 }
 
 export interface ProjectShellProps {
@@ -60,6 +75,7 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
   const setLastFocused = useStore((s) => s.setLastFocused)
   const setFileState = useStore((s) => s.setFileState)
   const setProject = useStore((s) => s.setProject)
+  const setProjectConfig = useStore((s) => s.setProjectConfig)
 
   const [mode, setMode] = useState<EditorMode>('source')
   const [richWarned, setRichWarned] = useState(false)
@@ -98,15 +114,6 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
       resolver,
     )
   }, [session, figures])
-
-  useEffect(() => {
-    if (!conversion) return
-    onOutput({
-      tex: conversion.tex,
-      images: conversion.images,
-      loadImages: () => loadProjectFigures(conversion.images, figures, handles),
-    })
-  }, [conversion, figures, handles, onOutput])
 
   // Re-checked when the tab regains focus and whenever a pane switches file: a
   // change can arrive from a phone over Sync with nothing local to announce it.
@@ -159,6 +166,43 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
     },
     [sources, edit, setFileState],
   )
+
+  /**
+   * A settings change is an edit to `book.md`.
+   *
+   * Both halves are written: `writeBookConfig` for the `book:` block and
+   * `writeMetadata` for the title, subtitle, author and date, which live as
+   * ordinary top-level keys and had no writer at all until now. The file may
+   * not exist yet — a folder is a project without one — so it is created
+   * rather than refused.
+   */
+  const changeConfig = useCallback(
+    (next: GalleyConfig) => {
+      setProjectConfig(next)
+      const current = sources.get(BOOK_FILE) ?? ''
+      const written = writeMetadata(writeBookConfig(current, next), next.metadata)
+      if (written === current) return
+      if (!sources.has(BOOK_FILE)) {
+        // No `book.md` yet: hold it in memory so the conversion sees it, and
+        // let the reader create the file by choosing where it goes. Writing a
+        // file into someone's folder uninvited is not this control's business.
+        return
+      }
+      edit(BOOK_FILE, written)
+    },
+    [setProjectConfig, sources, edit],
+  )
+
+  useEffect(() => {
+    if (!conversion || !session) return
+    onOutput({
+      tex: conversion.tex,
+      images: conversion.images,
+      loadImages: () => loadProjectFigures(conversion.images, figures, handles),
+      config: session.config,
+      setConfig: changeConfig,
+    })
+  }, [conversion, figures, handles, onOutput, session, changeConfig])
 
   const toggleMode = useCallback(() => {
     setMode((m) => {

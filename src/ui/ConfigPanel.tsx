@@ -51,9 +51,18 @@ export interface ConfigPanelProps {
   onChange: (config: GalleyConfig) => void
   /** True when the metadata below came from the document's own frontmatter. */
   prefilled: boolean
-  /** The document itself: the Structure section reads and writes its frontmatter. */
-  source: string
-  onSourceChange: (source: string) => void
+  /**
+   * The document itself: the Structure section reads and writes its
+   * frontmatter.
+   *
+   * OPTIONAL, because a folder project has no single document to key
+   * structure against — a part is a FILE there, and its role is set in the
+   * sidebar beside the file it belongs to. Omitting these hides the section
+   * entirely rather than leaving it inert, which is what the queued redesign
+   * in `issues/open.md` was waiting to know.
+   */
+  source?: string
+  onSourceChange?: (source: string) => void
 }
 
 const CHARACTERS: { value: DocumentCharacter; label: string; hint: string }[] = [
@@ -727,11 +736,15 @@ export function ConfigPanel({
       <div className="grid min-w-0 content-start gap-3">
         <KdpPreset config={config} onChange={onChange} />
 
-        <Separator />
+        {source !== undefined && onSourceChange !== undefined && (
+          <>
+            <Separator />
 
-        <Field label="Structure">
-          <StructureSection source={source} onSourceChange={onSourceChange} />
-        </Field>
+            <Field label="Structure">
+              <StructureSection source={source} onSourceChange={onSourceChange} />
+            </Field>
+          </>
+        )}
 
         <Separator />
 

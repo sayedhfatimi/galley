@@ -166,6 +166,8 @@ export default function App() {
             closeProject()
             setOpeningProject(false)
           }}
+          projectConfig={inProject ? projectOutput?.config : undefined}
+          onProjectConfigChange={inProject ? projectOutput?.setConfig : undefined}
         />
 
         {inProject ? (
