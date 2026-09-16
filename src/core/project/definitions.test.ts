@@ -91,25 +91,60 @@ describe('sharedDefinitions', () => {
     expect(types(out)).toContain('definition')
   })
 
-  // Round-trip: the synthesised line must still carry a title and a URL
-  // (including one with angle brackets, which must survive re-escaping) all
-  // the way through a second parse.
-  it('round-trips a title and an angle-bracket destination through re-parsing', () => {
-    const withTitle = sharedDefinitions(['[ref]: https://e.com "A Title"\n'])
-    const reparsedTitle = parseMarkdown(withTitle)
-    const titleDef = reparsedTitle.children.find((n) => n.type === 'definition')
-    expect(titleDef).toBeDefined()
-    if (titleDef?.type === 'definition') {
-      expect(titleDef.url).toBe('https://e.com')
-      expect(titleDef.title).toBe('A Title')
-    }
+  // The fourth Critical in this mechanism, and the first three found no test
+  // coverage strong enough to catch them: `render` used `node.label` (the
+  // DECODED text) instead of `node.identifier`, stripped `<`/`>` from the URL
+  // instead of escaping them, and let a title's trailing backslash escape its
+  // own closing quote. All three collapse the synthesised line — and with it
+  // the WHOLE injected block — into a paragraph.
 
-    const withAngles = sharedDefinitions(['[ref]: <https://e.com/a(b)>\n'])
-    const reparsedAngles = parseMarkdown(withAngles)
-    const angleDef = reparsedAngles.children.find((n) => n.type === 'definition')
-    expect(angleDef).toBeDefined()
-    if (angleDef?.type === 'definition') {
-      expect(angleDef.url).toBe('https://e.com/a(b)')
+  // Finding 1: `label` is decoded, `identifier` is not. A label containing an
+  // escaped bracket re-emits as a bare bracket, which is no longer a valid
+  // definition line — and because every part's definitions are joined into
+  // ONE block, that single bad line turns the entire block into a paragraph,
+  // so even the unrelated `good` definition alongside it stops resolving.
+  it('keeps the whole block resolvable when one label contains an escaped bracket', () => {
+    const withEscapedLabel = '[a\\]b]: https://e.com\n'
+    const good = '[good]: https://good.com\n'
+    const out = sharedDefinitions([withEscapedLabel, good])
+
+    expect(types(out)).not.toContain('paragraph')
+    expect(types(out)).toContain('definition')
+
+    // The `good` definition specifically must still resolve a reference.
+    const chapter = 'See [it][good].\n'
+    expect(types(`${chapter}\n\n${out}`)).toContain('linkReference')
+  })
+
+  // Finding 2: `<` and `>` are legal, meaningful characters in a bare
+  // destination. Stripping them (as opposed to escaping them) silently
+  // retargets the link with no diagnostic.
+  it('escapes rather than strips angle brackets in a URL', () => {
+    const source = '[r]: https://e.com/q?a=1>b\n'
+    const out = sharedDefinitions([source])
+    const reparsed = parseMarkdown(out)
+    const def = reparsed.children.find((n) => n.type === 'definition')
+    expect(def).toBeDefined()
+    if (def?.type === 'definition') {
+      expect(def.url).toBe('https://e.com/q?a=1>b')
     }
+  })
+
+  // Finding 3: a title ending in a backslash escapes its own closing quote,
+  // collapsing the block exactly as Finding 1 does. The fix carries no title
+  // at all, which makes this failure mode structurally impossible.
+  it('does not let a title ending in a backslash escape its own closing quote', () => {
+    const source = '[r]: https://e.com "t\\\\"\n'
+    const out = sharedDefinitions([source])
+    expect(types(out)).toContain('definition')
+    expect(types(out)).not.toContain('paragraph')
+  })
+
+  // `serialize.ts` resolves a `linkReference` through `def.url` alone and
+  // never reads `def.title` (see its `linkReference` case), so carrying a
+  // title buys nothing but an escaping surface. Assert none is emitted.
+  it('emits no title', () => {
+    const out = sharedDefinitions(['[ref]: https://e.com "A Title"\n'])
+    expect(out).not.toContain('"')
   })
 })

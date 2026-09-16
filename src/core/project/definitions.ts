@@ -53,8 +53,20 @@ export function sharedDefinitions(sources: readonly string[]): string {
  * there is no continuation line to carry anything.
  */
 function render(node: Definition): string {
-  const label = node.label ?? node.identifier
-  const url = `<${node.url.replace(/[<>]/g, '')}>`
-  const title = node.title ? ` "${node.title.replace(/"/g, '\\"')}"` : ''
-  return `[${label}]: ${url}${title}`
+  // `identifier`, NEVER `label`. Measured: `[a\]b]: url` parses to
+  // identifier 'a\]b' but label 'a]b' — label is the DECODED text, so
+  // re-emitting it drops the escape and the line stops being a definition.
+  // One such label collapses the whole injected block into a paragraph, which
+  // then prints in every chapter AND kills every cross-chapter link in the
+  // book. `identifier` is also whitespace-collapsed, which is what makes the
+  // "always one line" claim structurally true rather than merely usual.
+  //
+  // The URL is ESCAPED, not stripped: `<` and `>` are legal in a bare
+  // destination, and deleting them silently retargets the link
+  // (`https://e.com/q?a=1>b` became `https://e.com/q?a=1b`).
+  //
+  // No title. `serialize.ts` resolves a reference through `def.url` alone
+  // (see its `linkReference` case) and never reads `def.title`, so carrying
+  // one buys nothing but an escaping surface and the last multi-line case.
+  return `[${node.identifier}]: <${node.url.replace(/[\\<>]/g, '\\$&')}>`
 }
