@@ -73,6 +73,8 @@ function blockFromPm(node: PMNode): BlockContent | null {
       return tableFromPm(node)
     case 'mathBlock':
       return mathBlockFromPm(node)
+    case 'htmlBlock':
+      return htmlFromPm(node)
     case 'image':
       return imageBlockFromPm(node)
     default:
@@ -88,6 +90,19 @@ function imageBlockFromPm(node: PMNode): BlockContent {
     type: 'paragraph',
     children: [imageFromPm(node)],
   } satisfies Paragraph
+}
+
+/**
+ * galley addition: raw HTML back out exactly as it came in.
+ *
+ * One function for both the block and the inline form, because mdast has one
+ * `html` node type for both and the only difference is where it sits.
+ */
+function htmlFromPm(node: PMNode): BlockContent {
+  return {
+    type: 'html',
+    value: typeof node.attrs?.value === 'string' ? node.attrs.value : '',
+  } as unknown as BlockContent
 }
 
 function mathBlockFromPm(node: PMNode): BlockContent {
@@ -245,6 +260,8 @@ function phrasingFromPm(nodes: PMNode[]): PhrasingContent[] {
         type: 'inlineMath',
         value: tex,
       } as unknown as PhrasingContent)
+    } else if (node.type === 'htmlInline') {
+      out.push(htmlFromPm(node) as unknown as PhrasingContent)
     } else if (node.type === 'footnote') {
       // galley addition: split back into an inline reference plus a root-level
       // definition, which is the only shape mdast allows.

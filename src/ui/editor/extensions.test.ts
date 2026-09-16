@@ -40,8 +40,41 @@ describe('editor schema', () => {
     '| a | b |\n| - | - |\n| 1 | 2 |',
     '- [x] done\n- [ ] not done\n- plain item',
     '###### A sixth-level heading',
+    '<div class="x">hi</div>',
+    'Text <u>underline</u> and <br> more',
   ])('accepts %j', (markdown) => {
     const doc = mdastToPm(parseMarkdown(markdown))
     expect(() => PMNode.fromJSON(schema, doc)).not.toThrow()
+  })
+
+  /**
+   * The schema must not merely TOLERATE raw HTML — it has to give it back.
+   *
+   * Accepting the document and then dropping the attribute would leave the
+   * bridge tests green and still empty the `<div>` out of the author's file,
+   * which is the bug this whole node exists to close. So the assertion is on
+   * what comes back out of a real schema round trip, not on the absence of a
+   * throw.
+   */
+  it.each([
+    ['a block', '<div class="x">hi</div>', 'htmlBlock'],
+    ['inline', 'Text <u>x</u> more', 'htmlInline'],
+  ])('carries %s of raw HTML back out of the schema', (_name, markdown, type) => {
+    const doc = mdastToPm(parseMarkdown(markdown))
+    const round = PMNode.fromJSON(schema, doc).toJSON()
+    const found: string[] = []
+    const walk = (node: {
+      type?: string
+      attrs?: { value?: unknown }
+      content?: unknown[]
+    }) => {
+      if (node.type === type && typeof node.attrs?.value === 'string') {
+        found.push(node.attrs.value)
+      }
+      for (const child of (node.content ?? []) as (typeof node)[]) walk(child)
+    }
+    walk(round)
+    expect(found.length).toBeGreaterThan(0)
+    expect(markdown).toContain(found[0])
   })
 })

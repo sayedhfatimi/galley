@@ -53,6 +53,14 @@ describe('survives byte for byte', () => {
     ['a tag away from the line start', 'text #tag and more\n'],
     ['a highlight', '==highlight==\n'],
     ['a block reference', 'A paragraph ^block-id\n'],
+    // Raw HTML. Carried rather than typeset — `serialize.ts` still emits it as
+    // literal text with a `raw-html` diagnostic — but an author's `<br>` is
+    // theirs, and deleting it from their file was never a reasonable way to
+    // decline to typeset it.
+    ['a block of raw HTML', '<div class="x">hi</div>\n'],
+    ['inline raw HTML', 'Text <u>x</u> more\n'],
+    ['a line-break tag', 'Text <br> more\n'],
+    ['HTML wrapping real Markdown', '<div>\n\nmixed *md*\n\n</div>\n'],
   ])('keeps %s', (_name, source) => {
     expect(roundTrip(source)).toBe(source)
   })
@@ -193,9 +201,6 @@ describe('destroys content (pinned until fixed)', () => {
   it.each([
     ['an inline image', 'Text ![](fig.png) more\n', 'Text  more\n'],
     ['an inline image with alt text', 'Text ![alt](fig.png) more\n', 'Text  more\n'],
-    ['a block of raw HTML', '<div class="x">hi</div>\n', '\n'],
-    ['inline raw HTML', 'Text <u>x</u> more\n', 'Text x more\n'],
-    ['a line-break tag', 'Text <br> more\n', 'Text  more\n'],
     ['a bare link definition', '[ref]: https://example.com\n', '\n'],
     [
       'a reference link, whose definition is deleted',

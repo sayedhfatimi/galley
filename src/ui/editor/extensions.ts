@@ -9,6 +9,7 @@ import TaskList from '@tiptap/extension-task-list'
 import Typography from '@tiptap/extension-typography'
 import StarterKit from '@tiptap/starter-kit'
 import { Footnote } from './footnote'
+import { HtmlBlock, HtmlInline } from './html-passthrough'
 import { ImagePlaceholder } from './image'
 import { ImagePrompt } from './image-prompt'
 import { LinkPrompt } from './link'
@@ -55,6 +56,8 @@ export function createExtensions({ onRequestLink, onRequestImage }: EditorHandle
     MathInline,
     MathBlock,
     Footnote,
+    HtmlBlock,
+    HtmlInline,
     ImagePlaceholder,
     SlashCommand,
     LinkPrompt.configure({ onRequest: onRequestLink ?? (() => {}) }),

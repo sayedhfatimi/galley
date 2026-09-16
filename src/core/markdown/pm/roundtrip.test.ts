@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { Root } from 'mdast'
 import { describe, expect, it } from 'vitest'
 import { presetFor } from '../../config'
 import { serializeToLatex } from '../../latex/serialize'
@@ -142,6 +143,32 @@ it('does not re-serialise non-canonical Markdown back to its own source', () => 
  * corpus, including the Obsidian callouts and tags the same escape broke,
  * lives in `vault-fidelity.test.ts`.
  */
+/**
+ * Carrying raw HTML through the editor must not change what is TYPESET.
+ *
+ * The absolute assertion beside the equivalence: `serialize.ts` has always
+ * emitted HTML as literal text and raised one `raw-html` diagnostic, and
+ * teaching the ProseMirror bridge to hold on to it is a change to the
+ * author's FILE, not to the PDF. Without this, the two could drift and the
+ * byte-fidelity tests would not notice.
+ */
+describe('carrying raw HTML does not change the typesetting', () => {
+  it.each([
+    ['a block', '<div class="x">hi</div>\n'],
+    ['inline', 'Text <u>x</u> more\n'],
+  ])('leaves %s HTML typeset exactly as before', (_name, source) => {
+    expect(viaProseMirror(source)).toBe(direct(source))
+    // And it is still reported as untypeset, by both routes equally — the
+    // point is that the editor now KEEPS the author's HTML, not that galley
+    // has started typesetting it.
+    const raw = (tree: Root) =>
+      serializeToLatex(tree, config).diagnostics.filter((d) => d.kind === 'raw-html')
+    const viaEditor = raw(pmToMdast(mdastToPm(parseMarkdown(source))))
+    expect(viaEditor.length).toBeGreaterThan(0)
+    expect(viaEditor).toEqual(raw(parseMarkdown(source)))
+  })
+})
+
 describe('the editor carries Obsidian embeds through unrewritten', () => {
   const roundTrip = (source: string): string =>
     serializeToMarkdown(mdastToPm(bodyTree(parseMarkdown(source))))

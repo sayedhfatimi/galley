@@ -8,6 +8,7 @@ import type {
   FootnoteDefinition,
   FootnoteReference,
   Heading,
+  Html,
   Image,
   InlineCode,
   Link,
@@ -108,6 +109,15 @@ function blockToPm(node: RootContent): PMNode | null {
         ? { type: 'mathBlock', content: [{ type: 'text', text: tex }] }
         : { type: 'mathBlock' }
     }
+    // galley addition: raw HTML is carried, never dropped.
+    //
+    // `serialize.ts` already passes HTML through to the LaTeX as literal text
+    // with a `raw-html` diagnostic, so nothing here changes what is typeset.
+    // What it changes is the author's FILE: without a node to hold it, a
+    // `<div>` round-tripped to nothing at all and one keystroke deleted it
+    // from their vault.
+    case 'html':
+      return { type: 'htmlBlock', attrs: { value: (node as Html).value } }
     // Lone-image paragraphs in markdown surface here as a top-level
     // image MDAST node; emit as a block-level PM image node directly
     // (renderers commonly re-promote lone-image paragraphs
@@ -284,6 +294,11 @@ function phrasingNodeToPm(node: PhrasingContent, marks: PMMark[]): PMNode[] | nu
     // in `blockToPm`.
     case 'image':
       return null
+    // galley addition: inline raw HTML, for the same reason as the block form
+    // above. `Text <br> more` losing its `<br>` is the author's line break
+    // gone from their own file.
+    case 'html':
+      return [{ type: 'htmlInline', attrs: { value: (node as Html).value }, marks }]
     case 'inlineMath': {
       const tex = (node as { value?: string }).value ?? ''
       return [
