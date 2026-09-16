@@ -12,8 +12,10 @@ import { type GalleyConfig, type Metadata, usesMatter } from '../config'
 import type { Diagnostic } from '../diagnostics'
 import { extractFrontmatter, hasFrontmatter } from '../markdown/frontmatter'
 import { parseMarkdown } from '../markdown/parse'
+import { sharedDefinitions } from '../project/definitions'
+import type { FigureResolver, ProjectPart } from '../project/types'
 import { buildPreamble } from './preamble'
-import { serializeToLatex } from './serialize'
+import { type SerializeResult, serializeParts } from './serialize'
 
 export interface ConvertResult {
   /** A complete, self-contained document ready to compile. */
@@ -41,20 +43,23 @@ export function readFrontmatter(source: string): Metadata {
   return extractFrontmatter(parseMarkdown(source))
 }
 
-export function convert(
-  source: string,
-  config: GalleyConfig,
-  /** Image names the caller holds bytes for; omit when it cannot know. */
-  available?: ReadonlySet<string>,
-): ConvertResult {
-  const tree = parseMarkdown(source)
-  const frontmatter = extractFrontmatter(tree)
-  const { body, diagnostics, images, ownsMatterDivisions } = serializeToLatex(
-    tree,
-    config,
-    available,
-  )
+export interface ProjectConvertResult {
+  tex: string
+  diagnostics: Diagnostic[]
+  /**
+   * Sanitised names of every image the project draws — see `ConvertResult.images`.
+   */
+  images: string[]
+}
 
+/**
+ * Wrap a serialised body in a complete document.
+ *
+ * Shared by both entry points, because the matter-division rule below is
+ * exactly the kind of fact that must not be decided in two places — a
+ * project's \frontmatter and a single document's are the same \frontmatter.
+ */
+function assemble(config: GalleyConfig, result: SerializeResult): string {
   const { title, subtitle, author, date } = config.metadata
   const hasTitleBlock = Boolean(title || subtitle || author || date)
 
@@ -71,16 +76,61 @@ export function convert(
   // The body opens main matter itself when it has front or back matter to
   // separate from. Emitting one here as well would open the division twice and
   // reset the page numbering in the middle of the front matter.
-  if (matter && !ownsMatterDivisions) parts.push('\\mainmatter', '')
+  if (matter && !result.ownsMatterDivisions) parts.push('\\mainmatter', '')
   // A frontmatter-only document still compiles; the body is simply empty.
-  if (body.length > 0) parts.push(body, '')
+  if (result.body.length > 0) parts.push(result.body, '')
   parts.push('\\end{document}', '')
+  return parts.join('\n')
+}
 
+export function convert(
+  source: string,
+  config: GalleyConfig,
+  /** Image names the caller holds bytes for; omit when it cannot know. */
+  available?: ReadonlySet<string>,
+): ConvertResult {
+  const tree = parseMarkdown(source)
+  const result = serializeParts([{ tree }], config, available)
   return {
-    tex: parts.join('\n'),
-    diagnostics,
-    frontmatter,
-    images,
+    tex: assemble(config, result),
+    diagnostics: result.diagnostics,
+    frontmatter: extractFrontmatter(tree),
+    images: result.images,
     hasFrontmatter: hasFrontmatter(tree),
+  }
+}
+
+/**
+ * The whole of a folder project: every chapter, parsed together, as one
+ * complete `.tex`.
+ *
+ * A book's metadata comes from the caller's config (read from `book.md`),
+ * not from any one chapter's own frontmatter — see `assemble`'s doc comment
+ * for the division rule this shares with `convert`.
+ */
+export function convertProject(
+  parts: readonly ProjectPart[],
+  config: GalleyConfig,
+  available?: ReadonlySet<string>,
+  resolver?: FigureResolver,
+): ProjectConvertResult {
+  // Every definition in the book, made visible to every part before parsing —
+  // see `sharedDefinitions`'s doc comment for why a reference resolves only
+  // against a definition in the SAME parsed source.
+  const shared = sharedDefinitions(parts.map((part) => part.source))
+  const result = serializeParts(
+    parts.map((part) => ({
+      tree: parseMarkdown(shared === '' ? part.source : `${part.source}\n\n${shared}`),
+      spec: part.spec,
+      path: part.path,
+    })),
+    config,
+    available,
+    resolver,
+  )
+  return {
+    tex: assemble(config, result),
+    diagnostics: result.diagnostics,
+    images: result.images,
   }
 }

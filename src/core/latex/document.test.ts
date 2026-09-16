@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type GalleyConfig, presetFor } from '../config'
-import { convert, readFrontmatter } from './document'
+import { convert, convertProject, readFrontmatter } from './document'
 
 const cfg = (over: Partial<GalleyConfig> = {}): GalleyConfig => ({
   ...DEFAULT_CONFIG,
@@ -110,6 +110,92 @@ describe('front and main matter', () => {
       expect(tex).not.toContain('\\frontmatter')
       expect(tex).not.toContain('\\mainmatter')
     }
+  })
+})
+
+describe('convertProject', () => {
+  const book = {
+    ...presetFor('book'),
+    metadata: { title: 'A Book', author: 'A. Writer' },
+  }
+  const part = (path: string, source: string, role: 'front' | 'main' | 'back') => ({
+    path,
+    source,
+    spec: { role, numbered: role === 'main', listed: true },
+  })
+
+  it('opens front matter before the first part and main matter once', () => {
+    const { tex } = convertProject(
+      [
+        part('01-copyright.md', '# Copyright\n', 'front'),
+        part('02-one.md', '# Chapter One\n', 'main'),
+        part('03-two.md', '# Chapter Two\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex.match(/\\frontmatter/g)).toHaveLength(1)
+    expect(tex.match(/\\mainmatter/g)).toHaveLength(1)
+    expect(tex.indexOf('\\frontmatter')).toBeLessThan(tex.indexOf('Copyright'))
+    expect(tex.indexOf('\\tableofcontents')).toBeLessThan(tex.indexOf('\\mainmatter'))
+  })
+
+  it('takes metadata from the config, not from a chapter’s frontmatter', () => {
+    const { tex } = convertProject(
+      [
+        part(
+          '01-a.md',
+          '---\ntitle: Not This\ngalley:\n  role: main\n---\n\n# A\n',
+          'main',
+        ),
+      ],
+      book,
+    )
+    expect(tex).toContain('A Book')
+    expect(tex).not.toContain('Not This')
+  })
+
+  it('compiles a project with no parts at all', () => {
+    const { tex } = convertProject([], book)
+    expect(tex).toContain('\\begin{document}')
+    expect(tex).toContain('\\end{document}')
+  })
+
+  // The owner's decision measured in Task 9: a reference only becomes a
+  // reference NODE when its definition is in the same parsed source. Two
+  // parts, a link in one resolving only against a definition in the other —
+  // this fails silently (renders as literal text) without project-wide
+  // definitions.
+  it('resolves a link reference defined in a different part', () => {
+    const { tex } = convertProject(
+      [
+        part('01-a.md', '# A\n\nSee [the site][ref].\n', 'main'),
+        part('02-b.md', '# B\n\n[ref]: https://example.com\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex).toContain('\\href{https://example.com}{the site}')
+    expect(tex).not.toContain('[the site][ref]')
+  })
+
+  // Appending a part's own definitions back to itself must be inert: a
+  // duplicate `definition`/`footnoteDefinition` node serialises to the empty
+  // string (serialize.ts's `case 'definition'`). This proves the page a
+  // project produces when every part is already self-contained is exactly
+  // what it would have been without project-wide definitions at all.
+  it('adds nothing to the page when every part already defines its own footnote', () => {
+    const { tex } = convertProject(
+      [
+        part('01-a.md', '# A\n\nOne.[^a]\n\n[^a]: Note A\n', 'main'),
+        part('02-b.md', '# B\n\nTwo.[^b]\n\n[^b]: Note B\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex.match(/Note A/g)).toHaveLength(1)
+    expect(tex.match(/Note B/g)).toHaveLength(1)
+    expect(tex).not.toContain('[^a]')
+    expect(tex).not.toContain('[^b]')
+    expect(tex).not.toContain('[^a]: Note A')
+    expect(tex).not.toContain('[^b]: Note B')
   })
 })
 
