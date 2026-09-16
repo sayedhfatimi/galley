@@ -67,14 +67,25 @@ const DASHES = [
 
 export interface ToolbarProps {
   editor: Editor | null
-  /** Document-level actions, folded in here so there is no second chrome row. */
-  onOpen: () => void
-  onToggleToc: () => void
-  tocOpen: boolean
-  onHelp: () => void
-  onToggleMode: () => void
-  onClear: () => void
-  mode: 'rich' | 'source'
+  /**
+   * Document-level actions, folded in here so a single document needs no
+   * second chrome row.
+   *
+   * ALL OPTIONAL, because a folder project has none of them. Opening a file
+   * and clearing one are what the sidebar replaces; the contents belong to
+   * the book rather than to whichever pane has focus. What remains when they
+   * are omitted is unambiguously about the text the reader has selected,
+   * which is what lets one toolbar serve two editors.
+   */
+  onOpen?: () => void
+  onToggleToc?: () => void
+  tocOpen?: boolean
+  onHelp?: () => void
+  onToggleMode?: () => void
+  onClear?: () => void
+  mode?: 'rich' | 'source'
+  /** Rendered where the document actions would be. Used for the focus indicator. */
+  trailing?: React.ReactNode
 }
 
 export function Toolbar({
@@ -86,6 +97,7 @@ export function Toolbar({
   onToggleMode,
   onClear,
   mode,
+  trailing,
 }: ToolbarProps) {
   const state = useEditorState({
     editor,
@@ -251,37 +263,54 @@ export function Toolbar({
       ))}
 
       <div className="ml-auto flex items-center gap-0.5">
-        <ToolbarButton
-          icon={<FileUp className="size-4" />}
-          label="Open a Markdown file"
-          onClick={onOpen}
-        />
-        <ToolbarButton
-          icon={<ListTree className="size-4" />}
-          label="Table of contents"
-          active={tocOpen}
-          onClick={onToggleToc}
-        />
-        <ToolbarButton
-          icon={<CircleHelp className="size-4" />}
-          label="Help and about"
-          onClick={onHelp}
-        />
-        <ToolbarButton
-          icon={
-            mode === 'rich' ? <Code className="size-4" /> : <PenLine className="size-4" />
-          }
-          label={mode === 'rich' ? 'Edit as Markdown' : 'Edit as rich text'}
-          onClick={onToggleMode}
-        />
-        {/* Separated from the rest: this discards the document rather than
-            changing it, and it is the only control here that destroys work. */}
-        <Separator orientation="vertical" className="mx-1 h-5" />
-        <ToolbarButton
-          icon={<Trash2 className="size-4" />}
-          label="Clear the document"
-          onClick={onClear}
-        />
+        {trailing}
+        {onOpen && (
+          <ToolbarButton
+            icon={<FileUp className="size-4" />}
+            label="Open a Markdown file"
+            onClick={onOpen}
+          />
+        )}
+        {onToggleToc && (
+          <ToolbarButton
+            icon={<ListTree className="size-4" />}
+            label="Table of contents"
+            active={tocOpen}
+            onClick={onToggleToc}
+          />
+        )}
+        {onHelp && (
+          <ToolbarButton
+            icon={<CircleHelp className="size-4" />}
+            label="Help and about"
+            onClick={onHelp}
+          />
+        )}
+        {onToggleMode && (
+          <ToolbarButton
+            icon={
+              mode === 'rich' ? (
+                <Code className="size-4" />
+              ) : (
+                <PenLine className="size-4" />
+              )
+            }
+            label={mode === 'rich' ? 'Edit as Markdown' : 'Edit as rich text'}
+            onClick={onToggleMode}
+          />
+        )}
+        {onClear && (
+          <>
+            {/* Separated from the rest: this discards the document rather than
+                changing it, and it is the only control here that destroys work. */}
+            <Separator orientation="vertical" className="mx-1 h-5" />
+            <ToolbarButton
+              icon={<Trash2 className="size-4" />}
+              label="Clear the document"
+              onClick={onClear}
+            />
+          </>
+        )}
       </div>
     </div>
   )

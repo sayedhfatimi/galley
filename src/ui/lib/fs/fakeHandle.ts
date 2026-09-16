@@ -40,6 +40,10 @@ export interface FakeFs {
   touch: (path: string, content: string, lastModified?: number) => void
   /** Run once, the next time any writable is opened. Lands a race deliberately. */
   onOpenWritable: (hook: (path: string) => void) => void
+  /** How many times a write was ATTEMPTED, per path — refused ones included. */
+  writeAttempts: Map<string, number>
+  /** How many times each file was READ, including every staleness check. */
+  reads: Map<string, number>
 }
 
 const DEFAULT_MTIME = 1_000_000
@@ -56,6 +60,8 @@ export function fakeFs(initial: Record<string, string | FakeFile>): FakeFs {
   }
 
   const enumerated = new Map<string, number>()
+  const writeAttempts = new Map<string, number>()
+  const reads = new Map<string, number>()
   let writableHook: ((path: string) => void) | null = null
 
   const childrenOf = (dir: string) => {
@@ -77,12 +83,14 @@ export function fakeFs(initial: Record<string, string | FakeFile>): FakeFs {
       kind: 'file',
       name,
       getFile: async () => {
+        reads.set(path, (reads.get(path) ?? 0) + 1)
         const entry = files.get(path)
         if (!entry) throw new DOMException('not found', 'NotFoundError')
         const file = new File([entry.content], name, { lastModified: entry.lastModified })
         return file
       },
       createWritable: async () => {
+        writeAttempts.set(path, (writeAttempts.get(path) ?? 0) + 1)
         writableHook?.(path)
         writableHook = null
         let buffer = ''
@@ -140,6 +148,8 @@ export function fakeFs(initial: Record<string, string | FakeFile>): FakeFs {
   return {
     root: directoryHandle('', 'project'),
     enumerated,
+    writeAttempts,
+    reads,
     files,
     touch: (path, content, lastModified) => {
       const previous = files.get(path)?.lastModified ?? DEFAULT_MTIME
