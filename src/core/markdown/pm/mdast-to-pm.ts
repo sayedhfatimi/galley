@@ -308,13 +308,20 @@ function phrasingNodeToPm(node: PhrasingContent, marks: PMMark[]): PMNode[] | nu
       return linkToPm(node as Link, marks)
     case 'break':
       return [hardBreakToPm(node as Break)]
-    // Inline images inside a paragraph with other content are dropped
-    // — image is a block-level node in our PM schema, so it can't
-    // live inside a paragraph. Rare markdown form; the common case
-    // (lone-image paragraph) is promoted to a top-level block image
-    // in `blockToPm`.
-    case 'image':
-      return null
+    // galley addition: an inline image gets an inline node.
+    //
+    // The block `image` node cannot live inside a paragraph, so this case
+    // used to return null and `Text ![](fig.png) more` came back as
+    // `Text  more` — the picture deleted from the author's own file. A
+    // lone-image paragraph is still promoted to the block form in
+    // `blockToPm`; this is for the one that shares a line with prose.
+    case 'image': {
+      const image = node as Image
+      const attrs: Record<string, unknown> = { src: image.url }
+      if (image.alt) attrs.alt = image.alt
+      if (image.title) attrs.title = image.title
+      return [{ type: 'imageInline', attrs, marks }]
+    }
     // galley addition: inline raw HTML, for the same reason as the block form
     // above. `Text <br> more` losing its `<br>` is the author's line break
     // gone from their own file.

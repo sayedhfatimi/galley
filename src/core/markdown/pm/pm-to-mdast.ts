@@ -268,7 +268,7 @@ function phrasingFromPm(nodes: PMNode[]): PhrasingContent[] {
       out.push(wrapTextWithMarks(node.text ?? '', node.marks ?? []))
     } else if (node.type === 'hardBreak') {
       out.push({ type: 'break' })
-    } else if (node.type === 'image') {
+    } else if (node.type === 'image' || node.type === 'imageInline') {
       out.push(imageFromPm(node))
     } else if (node.type === 'mathInline') {
       const tex = (node.content ?? []).map((n) => n.text ?? '').join('')

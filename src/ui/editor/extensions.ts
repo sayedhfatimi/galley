@@ -11,6 +11,7 @@ import StarterKit from '@tiptap/starter-kit'
 import { Footnote } from './footnote'
 import { HtmlBlock, HtmlInline } from './html-passthrough'
 import { ImagePlaceholder } from './image'
+import { ImageInline } from './image-inline'
 import { ImagePrompt } from './image-prompt'
 import { LinkPrompt } from './link'
 import { LinkDefinition } from './link-definition'
@@ -60,6 +61,7 @@ export function createExtensions({ onRequestLink, onRequestImage }: EditorHandle
     HtmlBlock,
     HtmlInline,
     ImagePlaceholder,
+    ImageInline,
     LinkDefinition,
     SlashCommand,
     LinkPrompt.configure({ onRequest: onRequestLink ?? (() => {}) }),

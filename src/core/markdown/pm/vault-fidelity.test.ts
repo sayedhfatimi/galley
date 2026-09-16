@@ -65,6 +65,11 @@ describe('survives byte for byte', () => {
     // round-trip to an EMPTY FILE.
     ['a bare link definition', '[ref]: https://example.com\n'],
     ['several link definitions', '[a]: http://x.com "T"\n[b]: http://y.com\n'],
+    // Inline images — the block image node cannot live inside a paragraph, so
+    // these were dropped outright.
+    ['an inline image', 'Text ![](fig.png) more\n'],
+    ['an inline image with alt text', 'Text ![alt](fig.png) more\n'],
+    ['an inline image with a title', 'Text ![a](f.png "T") more\n'],
   ])('keeps %s', (_name, source) => {
     expect(roundTrip(source)).toBe(source)
   })
@@ -189,24 +194,6 @@ describe('survives inside a containing block', () => {
     const out = roundTrip('| a | b |\n| - | - |\n| [[x]] | 2 |\n')
     expect(out).toContain('[[x]]')
     expect(out).not.toContain('\\[')
-  })
-})
-
-/**
- * NOT YET FAITHFUL — content destroyed.
- *
- * Every row loses something the author wrote, and none of it was tracked
- * before 2026-09-16. `![](…)` inline and raw HTML are dropped because the PM
- * schema has no inline image and no html node at all; a link definition is
- * dropped because `blockToPm` has no `definition` case. Escaping is not
- * involved and the gate cannot help — these need the schema to grow.
- */
-describe('destroys content (pinned until fixed)', () => {
-  it.each([
-    ['an inline image', 'Text ![](fig.png) more\n', 'Text  more\n'],
-    ['an inline image with alt text', 'Text ![alt](fig.png) more\n', 'Text  more\n'],
-  ])('loses %s', (_name, source, current) => {
-    expect(roundTrip(source)).toBe(current)
   })
 })
 

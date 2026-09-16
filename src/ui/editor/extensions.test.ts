@@ -44,6 +44,7 @@ describe('editor schema', () => {
     'Text <u>underline</u> and <br> more',
     '[ref]: https://example.com',
     'A [reference][ref].\n\n[ref]: https://example.com/t',
+    'Text ![inline](fig.png) more',
   ])('accepts %j', (markdown) => {
     const doc = mdastToPm(parseMarkdown(markdown))
     expect(() => PMNode.fromJSON(schema, doc)).not.toThrow()
