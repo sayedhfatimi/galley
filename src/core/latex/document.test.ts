@@ -301,4 +301,22 @@ describe('Obsidian embeds in a single document', () => {
     expect(tex).toContain('[Figure not included:')
     expect(diagnostics.map((d) => d.kind)).toEqual(['image-unsupported'])
   })
+
+  // The pipe on an Obsidian embed is a display width in pixels, not alt text.
+  // Reading it as alt text put a spurious `\caption{400}` under every sized
+  // figure in a real vault.
+  it('gives a sized embed no caption', () => {
+    const { tex } = convert('![[cover.png|400]]\n', cfg())
+    expect(tex).toContain('\\includegraphics')
+    expect(tex).not.toContain('\\caption')
+  })
+
+  // `![[Appendix A]]` transcludes a note. Reported as a bad image format, it
+  // named the wrong cause entirely — in the exact case folder projects exist
+  // for. It is not an image reference, so it raises no image diagnostic.
+  it('raises no image diagnostic for a note transclusion', () => {
+    const { tex, diagnostics } = convert('![[Appendix A]]\n', cfg())
+    expect(diagnostics).toEqual([])
+    expect(tex).not.toContain('Figure not included')
+  })
 })

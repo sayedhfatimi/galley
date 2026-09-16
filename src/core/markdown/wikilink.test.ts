@@ -35,9 +35,41 @@ describe('wikilink embeds', () => {
     expect((p.children[2] as { value: string }).value).toBe(' here')
   })
 
-  it('reads an alias as the alt text', () => {
-    const p = firstParagraph('![[diagram.png|A diagram]]\n')
-    expect(p.children[0]).toMatchObject({ url: 'diagram.png', alt: 'A diagram' })
+  // In Obsidian the pipe on an EMBED is a display width in pixels, not alt
+  // text: `![[cover.png|400]]` means "render this 400px wide". Reading it as
+  // alt text put `\caption{400}` under every sized figure in a real vault.
+  it('discards the pipe portion, which is a display width and not a caption', () => {
+    expect(firstParagraph('![[diagram.png|400]]\n').children[0]).toMatchObject({
+      type: 'image',
+      url: 'diagram.png',
+      alt: '',
+    })
+    expect(firstParagraph('![[diagram.png|A diagram]]\n').children[0]).toMatchObject({
+      type: 'image',
+      url: 'diagram.png',
+      alt: '',
+    })
+  })
+
+  // `![[Appendix A]]` transcludes a NOTE. Treating it as an image made galley
+  // answer "That image format cannot be typeset. Use PNG, JPG, JPEG, PDF." —
+  // the wrong cause, in the exact case folder projects exist for. A target
+  // with no file extension is left exactly as the author wrote it.
+  it('leaves a note transclusion untouched', () => {
+    const p = firstParagraph('![[Appendix A]]\n')
+    expect(p.children.map((c) => c.type)).toEqual(['text'])
+    expect((p.children[0] as { value: string }).value).toBe('![[Appendix A]]')
+  })
+
+  it('still converts an embed that names a file', () => {
+    const p = firstParagraph('![[figures/plot.png]]\n')
+    expect(p.children[0]).toMatchObject({ type: 'image', url: 'figures/plot.png' })
+  })
+
+  it('converts a file embed sitting beside a note transclusion', () => {
+    const p = firstParagraph('![[Appendix A]] then ![[plot.png]]\n')
+    expect(p.children.map((c) => c.type)).toEqual(['text', 'image'])
+    expect((p.children[0] as { value: string }).value).toBe('![[Appendix A]] then ')
   })
 
   it('handles two embeds in one paragraph', () => {
