@@ -16,11 +16,18 @@ import type { Diagnostic } from '@/core/diagnostics'
  *
  * Dismissal is keyed by content, so an unrelated edit will not resurrect a
  * notice, but a genuinely new one still appears.
+ *
+ * The key includes the FILE, which in a folder project is the difference
+ * between one notice and twenty-five. `DiagnosticCollector` already
+ * de-duplicates on kind + detail + file, so core emits the right number; it
+ * was this component that collapsed them — two chapters with the same problem
+ * became one alert, dismissing it dismissed both, and React saw a duplicate
+ * key into the bargain.
  */
 export function Diagnostics({ items }: { items: Diagnostic[] }) {
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set())
 
-  const keyOf = (d: Diagnostic) => `${d.kind}:${d.detail ?? ''}`
+  const keyOf = (d: Diagnostic) => `${d.kind}:${d.detail ?? ''}:${d.file ?? ''}`
   const visible = items.filter((d) => !dismissed.has(keyOf(d)))
   if (visible.length === 0) return null
 
@@ -32,6 +39,9 @@ export function Diagnostics({ items }: { items: Diagnostic[] }) {
           <Alert key={key} className="pr-10">
             <Info className="size-4" />
             <AlertDescription>
+              {/* Which file, first: in a book, "a figure could not be found"
+                  without the chapter's name is a search rather than a notice. */}
+              {d.file && <span className="mr-1.5 font-medium">{d.file}</span>}
               {d.message}
               {d.detail && (
                 <span className="mt-1 block font-mono text-muted-foreground text-xs">
