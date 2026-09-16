@@ -164,7 +164,11 @@ export default function App() {
           projectName={inProject ? (opening.remembered?.name ?? 'project') : null}
           canOpenProject={opening.supported}
           onOpenProject={() => setOpeningProject(true)}
-          onCloseProject={() => {
+          onCloseProject={async () => {
+            // Anything still in the debounce is written BEFORE the shell
+            // unmounts, because unmounting clears those timers and the edit
+            // would go with them.
+            await projectOutput?.flushEdits()
             closeProject()
             setOpeningProject(false)
           }}

@@ -44,6 +44,16 @@ export interface Autosave {
   resolveWithTheirs: (path: string, lastModified: number) => void
   /** Flush any pending write for this path immediately. */
   flush: (path: string) => Promise<void>
+  /**
+   * Flush every pending write.
+   *
+   * Called before the project closes. The hook's own cleanup clears the
+   * timers, so without this an edit made inside the debounce window is simply
+   * gone — no error and no refusal, with the file still holding what it held
+   * before. Typing the last word of a sentence and clicking Close is an
+   * ordinary gesture, and it was losing that word.
+   */
+  flushAll: () => Promise<void>
 }
 
 export function useAutosave({ handles, files, setFileState }: AutosaveDeps): Autosave {
@@ -143,6 +153,10 @@ export function useAutosave({ handles, files, setFileState }: AutosaveDeps): Aut
     latest.current.setFileState(path, { conflict: null, dirty: false, lastModified })
   }, [])
 
+  const flushAll = useCallback(async () => {
+    for (const path of [...pending.current.keys()]) await flush(path)
+  }, [flush])
+
   useEffect(() => {
     const timerMap = timers.current
     return () => {
@@ -151,5 +165,5 @@ export function useAutosave({ handles, files, setFileState }: AutosaveDeps): Aut
     }
   }, [])
 
-  return { save, recheck, resolveWithTheirs, flush }
+  return { save, recheck, resolveWithTheirs, flush, flushAll }
 }

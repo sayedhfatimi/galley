@@ -45,6 +45,15 @@ export interface ProjectOutput {
   images: string[]
   /** Reads those figures' bytes from the folder, on demand. */
   loadImages: () => Promise<{ name: string; bytes: Uint8Array }[]>
+  /**
+   * Writes out anything still sitting in the debounce.
+   *
+   * Called before the project closes. Without it, typing the last word of a
+   * sentence and clicking Close loses that word: the shell unmounts, the
+   * hook's cleanup clears the pending timers, and the file still holds what it
+   * held before — no error and no refusal.
+   */
+  flushEdits: () => Promise<void>
   /** The book's settings, from `book.md`. */
   config: GalleyConfig
   /**
@@ -133,6 +142,27 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
     [session?.panes.left, session?.panes.right],
   )
 
+  /**
+   * Closing the TAB is the one exit galley cannot flush.
+   *
+   * A write is asynchronous and the page is going away, so there is no
+   * reliable way to finish one during unload — the browser's own prompt is
+   * the only thing that actually protects the edit. Registered only while
+   * something is genuinely unsaved, so it never interrupts someone who has
+   * nothing to lose.
+   */
+  const anyDirty = useMemo(
+    () => [...files.values()].some((f) => f.dirty || f.conflict),
+    [files],
+  )
+
+  useEffect(() => {
+    if (!anyDirty) return
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [anyDirty])
+
   useEffect(() => {
     const onFocus = () => void autosave.recheck(openPaths)
     window.addEventListener('focus', onFocus)
@@ -216,10 +246,11 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
       tex: conversion.tex,
       images: conversion.images,
       loadImages: () => loadProjectFigures(conversion.images, figures, handles),
+      flushEdits: autosave.flushAll,
       config: session.config,
       setConfig: changeConfig,
     })
-  }, [conversion, figures, handles, onOutput, session, changeConfig])
+  }, [conversion, figures, handles, onOutput, session, changeConfig, autosave.flushAll])
 
   /**
    * A dropped picture becomes a file in the author's folder, beside the

@@ -26,7 +26,7 @@ export interface ActionBarProps {
   projectName: string | null
   canOpenProject: boolean
   onOpenProject: () => void
-  onCloseProject: () => void
+  onCloseProject: () => void | Promise<void>
   /** In project mode, the book's settings rather than the document's. */
   projectConfig?: GalleyConfig
   onProjectConfigChange?: (config: GalleyConfig) => void
@@ -71,7 +71,7 @@ export function ActionBar({
         {/* Project actions sit here, spanning everything, because a folder is
             neither one editor's business nor the formatting toolbar's. */}
         {projectName ? (
-          <Button variant="ghost" size="sm" onClick={onCloseProject}>
+          <Button variant="ghost" size="sm" onClick={() => void onCloseProject()}>
             <X className="size-3.5" />
             Close
           </Button>

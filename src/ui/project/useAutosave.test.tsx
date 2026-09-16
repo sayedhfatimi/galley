@@ -59,8 +59,14 @@ async function mount(fs: ReturnType<typeof fakeFs>) {
   const container = document.createElement('div')
   const root = createRoot(container)
   act(() => root.render(<harness.Harness />))
-  cleanup.push(() => act(() => root.unmount()))
-  return harness
+  let unmounted = false
+  const unmount = () => {
+    if (unmounted) return
+    unmounted = true
+    act(() => root.unmount())
+  }
+  cleanup.push(unmount)
+  return Object.assign(harness, { unmount })
 }
 
 describe('useAutosave', () => {
@@ -230,5 +236,44 @@ describe('useAutosave', () => {
       await h.api.flush('a.md')
     })
     expect(fs.files.get('a.md')?.content).toBe('new')
+  })
+})
+
+/**
+ * Closing the project unmounts the shell, and the hook's cleanup clears every
+ * pending timer. An edit made inside the debounce window is then simply gone —
+ * no error, no refusal, and the file still holds what it held before.
+ *
+ * Small window, ordinary gesture: type the last word of a sentence and click
+ * Close. This is the class of loss the whole branch exists to prevent, arriving
+ * through the one door nothing was watching.
+ */
+describe('a pending edit and an unmount', () => {
+  it('is lost if nothing flushes it', async () => {
+    const fs = fakeFs({ 'a.md': 'old' })
+    const h = await mount(fs)
+
+    act(() => h.api.save('a.md', 'the last thing I typed'))
+    // The shell unmounts before the debounce fires.
+    h.unmount()
+
+    await act(async () => {
+      vi.runAllTimers()
+      await Promise.resolve()
+    })
+    expect(fs.files.get('a.md')?.content).toBe('old')
+  })
+
+  it('survives when the caller flushes first', async () => {
+    const fs = fakeFs({ 'a.md': 'old' })
+    const h = await mount(fs)
+
+    act(() => h.api.save('a.md', 'the last thing I typed'))
+    await act(async () => {
+      await h.api.flushAll()
+    })
+    h.unmount()
+
+    expect(fs.files.get('a.md')?.content).toBe('the last thing I typed')
   })
 })
