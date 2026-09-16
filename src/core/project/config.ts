@@ -45,18 +45,30 @@ function bool(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined
 }
 
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+/**
+ * A number the UI can also represent. Finiteness alone is not enough: the
+ * module's contract is that nothing surviving this reader can put the renderer
+ * into a state the interface cannot show, and `ConfigPanel` enforces `min={0}`
+ * on margins and offers only depths 0-3. A negative margin or a depth of 99
+ * would pass a finiteness check and then be unshowable.
+ */
+function bounded(value: unknown, min: number, max: number): number | undefined {
+  return typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= min &&
+    value <= max
+    ? value
+    : undefined
 }
 
 function readMargins(value: unknown): Margins | undefined {
   const raw = record(value)
   if (!raw) return undefined
   const unit = oneOf<LengthUnit>(raw.unit, ['mm', 'in'])
-  const top = integer(raw.top)
-  const bottom = integer(raw.bottom)
-  const inner = integer(raw.inner)
-  const outer = integer(raw.outer)
+  const top = bounded(raw.top, 0, 500)
+  const bottom = bounded(raw.bottom, 0, 500)
+  const inner = bounded(raw.inner, 0, 500)
+  const outer = bounded(raw.outer, 0, 500)
   if (unit === undefined) return undefined
   if ([top, bottom, inner, outer].some((n) => n === undefined)) return undefined
   return {
@@ -73,8 +85,8 @@ function readPaper(value: unknown): Paper | undefined {
   if (name) return { kind: 'named', name }
   const raw = record(value)
   if (!raw) return undefined
-  const width = integer(raw.width)
-  const height = integer(raw.height)
+  const width = bounded(raw.width, 1, 2000)
+  const height = bounded(raw.height, 1, 2000)
   const unit = oneOf<LengthUnit>(raw.unit, ['mm', 'in'])
   if (width === undefined || height === undefined || unit === undefined) return undefined
   return { kind: 'custom', width, height, unit }
@@ -99,8 +111,13 @@ export function readBookConfig(
   const twoSided = bool(raw.two_sided)
   if (twoSided !== undefined) out.twoSided = twoSided
 
-  const fontSize = oneOf(String(raw.font_size), ['10', '11', '12'])
-  if (fontSize) out.fontSize = Number(fontSize) as FontSize
+  // Strict, not coerced. `String(raw.font_size)` would accept the string
+  // "11" AND the single-element array ["11"], which stringifies to "11" —
+  // every other field here checks its type outright.
+  const fontSize = raw.font_size
+  if (fontSize === 10 || fontSize === 11 || fontSize === 12) {
+    out.fontSize = fontSize as FontSize
+  }
 
   const typeface = oneOf(raw.typeface, Object.keys(TYPEFACES) as TypefaceName[])
   if (typeface) out.typeface = typeface
@@ -115,7 +132,7 @@ export function readBookConfig(
   const toc = record(raw.toc)
   if (toc) {
     const include = bool(toc.include)
-    const depth = integer(toc.depth)
+    const depth = bounded(toc.depth, 0, 3)
     if (include !== undefined && depth !== undefined) out.toc = { include, depth }
   }
 

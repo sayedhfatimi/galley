@@ -51,6 +51,62 @@ describe('readBookConfig', () => {
     ).toEqual({})
   })
 
+  it('rejects a quoted font_size string rather than coercing it', () => {
+    // `String(raw.font_size)` would stringify the string "11" right back to
+    // "11" and pass — font_size must be checked as a number outright.
+    expect(read('---\nbook:\n  font_size: "11"\n---\n')).toEqual({})
+  })
+
+  it('rejects a single-element font_size array rather than coercing it', () => {
+    // JS stringifies ["11"] to "11", which is exactly why String(...) is
+    // unsafe here.
+    expect(read('---\nbook:\n  font_size: ["11"]\n---\n')).toEqual({})
+  })
+
+  it('rejects margins with a negative side rather than a box the UI cannot show', () => {
+    // ConfigPanel enforces min={0} on margins; a negative top must invalidate
+    // the whole box, the same way a missing side does.
+    expect(
+      read(
+        '---\nbook:\n  margins: { top: -5, bottom: 22, inner: 22, outer: 18, unit: mm }\n---\n',
+      ),
+    ).toEqual({})
+  })
+
+  it('rejects a toc depth outside what ConfigPanel offers', () => {
+    // ConfigPanel only offers depths 0-3.
+    expect(read('---\nbook:\n  toc: { include: true, depth: 99 }\n---\n')).toEqual({})
+  })
+
+  it('rejects a custom paper with a zero width', () => {
+    expect(
+      read('---\nbook:\n  paper: { width: 0, height: 300, unit: in }\n---\n'),
+    ).toEqual({})
+  })
+
+  it('accepts font_size as a number at each supported value', () => {
+    expect(read('---\nbook:\n  font_size: 10\n---\n')).toEqual({ fontSize: 10 })
+    expect(read('---\nbook:\n  font_size: 11\n---\n')).toEqual({ fontSize: 11 })
+    expect(read('---\nbook:\n  font_size: 12\n---\n')).toEqual({ fontSize: 12 })
+  })
+
+  it('accepts toc depth at its boundaries', () => {
+    expect(read('---\nbook:\n  toc: { include: true, depth: 0 }\n---\n')).toEqual({
+      toc: { include: true, depth: 0 },
+    })
+    expect(read('---\nbook:\n  toc: { include: true, depth: 3 }\n---\n')).toEqual({
+      toc: { include: true, depth: 3 },
+    })
+  })
+
+  it('accepts margins at the zero boundary', () => {
+    expect(
+      read(
+        '---\nbook:\n  margins: { top: 0, bottom: 0, inner: 0, outer: 0, unit: mm }\n---\n',
+      ),
+    ).toEqual({ margins: { top: 0, bottom: 0, inner: 0, outer: 0, unit: 'mm' } })
+  })
+
   it('ignores an unsupported paper name rather than accepting it', () => {
     // "letter-half" is not a key in PAPER_SIZES and has no width/height/unit,
     // so it must be rejected as a named size AND fail the custom-paper shape —
