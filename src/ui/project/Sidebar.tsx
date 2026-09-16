@@ -41,7 +41,17 @@ const ROLE_LABELS: Record<PartRole, string> = {
   back: 'Back matter',
 }
 
-const ROLES: PartRole[] = ['front', 'main', 'back']
+/**
+ * Reading order, taken from `roleRank` rather than restated.
+ *
+ * `core/structure.ts` decides what order the divisions of a book come in, and
+ * the sidebar must agree with the typeset output or the list is lying. Sorting
+ * by `roleRank` here means there is one source for that fact and this list is
+ * only a set.
+ */
+const ROLES: PartRole[] = (['main', 'back', 'front'] as PartRole[]).sort(
+  (a, b) => roleRank(a) - roleRank(b),
+)
 
 /** `not-in-book` is a real choice here, not the absence of one. */
 type Membership = PartRole | 'note'
@@ -77,7 +87,8 @@ export function Sidebar({
     const groups = new Map<PartRole, typeof project.parts>()
     for (const role of ROLES) groups.set(role, [])
     for (const part of project.parts) groups.get(part.spec.role)?.push(part)
-    return [...groups.entries()].sort(([a], [b]) => roleRank(a) - roleRank(b))
+    // Insertion order is ROLES' order, which is `roleRank`'s.
+    return [...groups.entries()]
   }, [project.parts])
 
   const row = (path: string, membership: Membership) => (
@@ -131,6 +142,27 @@ export function Sidebar({
   )
 }
 
+/**
+ * What to call a file in the list.
+ *
+ * Its own NAME, never its first heading. A part is a file here, so retitling a
+ * heading can no longer lose the file's settings — the gap `known-gaps.md`
+ * recorded for single-document structure.
+ *
+ * Except when that name is `index`. A chapter per folder, with its figures
+ * beside it, is one of the layouts the spec explicitly supports, and every
+ * chapter in such a book is called `index.md` — so the list read "index,
+ * index, index". The folder is the name the author chose; the file name is
+ * just the convention that puts it there. Found by opening a real project and
+ * looking at it.
+ */
+function labelFor(path: string): string {
+  const segments = path.split('/')
+  const base = (segments.pop() ?? path).replace(/\.(md|markdown)$/i, '')
+  if (base.toLowerCase() !== 'index') return base
+  return segments.at(-1) ?? base
+}
+
 function GroupHeading({ children }: { children: React.ReactNode }) {
   return (
     <h2 className="px-2 pb-1 font-medium text-[11px] text-muted-foreground/70 uppercase tracking-wider">
@@ -162,14 +194,7 @@ function Row({
   onOpenBeside,
   onChangeMembership,
 }: RowProps) {
-  // The file's own name, never its first heading. A part IS a file here, so
-  // retitling a heading can no longer lose the file's settings — the gap
-  // `known-gaps.md` recorded for single-document structure.
-  const name =
-    path
-      .split('/')
-      .pop()
-      ?.replace(/\.(md|markdown)$/i, '') ?? path
+  const name = labelFor(path)
   const nested = path.includes('/')
 
   return (

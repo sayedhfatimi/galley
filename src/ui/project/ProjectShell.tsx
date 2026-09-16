@@ -11,7 +11,7 @@ import { Diagnostics } from '@/ui/Diagnostics'
 import { type EditorMode, EditorPane } from '@/ui/editor/EditorPane'
 import { type PaneSide, useStore } from '@/ui/lib/store'
 import { ConflictBar } from './ConflictBar'
-import { buildFigureIndex } from './figures'
+import { buildFigureIndex, loadProjectFigures } from './figures'
 import { applyMembership, type Membership } from './membership'
 import { SharedToolbar } from './SharedToolbar'
 import { Sidebar } from './Sidebar'
@@ -32,12 +32,29 @@ import { useAutosave } from './useAutosave'
  * edit.
  */
 
-export interface ProjectShellProps {
-  onRenderPdf: (tex: string, images: { name: string; bytes: Uint8Array }[]) => void
-  onTex: (tex: string) => void
+/** What the ActionBar needs to render or download this project. */
+export interface ProjectOutput {
+  tex: string
+  /** Engine names of the figures this book draws. */
+  images: string[]
+  /** Reads those figures' bytes from the folder, on demand. */
+  loadImages: () => Promise<{ name: string; bytes: Uint8Array }[]>
 }
 
-export function ProjectShell({ onTex }: ProjectShellProps) {
+export interface ProjectShellProps {
+  /**
+   * Lifted because Render PDF and the `.tex` download live in the ActionBar,
+   * which spans the whole application and knows nothing about a project's
+   * config or its figure resolver. Passing the FIGURE LOADER up rather than
+   * only the `.tex` is the point: a project's figures come from the folder,
+   * and `App`'s own loader reads the single-document image store, so a
+   * project render found no pictures at all and the engine stopped on the
+   * first one.
+   */
+  onOutput: (output: ProjectOutput) => void
+}
+
+export function ProjectShell({ onOutput }: ProjectShellProps) {
   const session = useStore((s) => s.session)
   const setPane = useStore((s) => s.setPane)
   const setLastFocused = useStore((s) => s.setLastFocused)
@@ -83,8 +100,13 @@ export function ProjectShell({ onTex }: ProjectShellProps) {
   }, [session, figures])
 
   useEffect(() => {
-    if (conversion) onTex(conversion.tex)
-  }, [conversion, onTex])
+    if (!conversion) return
+    onOutput({
+      tex: conversion.tex,
+      images: conversion.images,
+      loadImages: () => loadProjectFigures(conversion.images, figures, handles),
+    })
+  }, [conversion, figures, handles, onOutput])
 
   // Re-checked when the tab regains focus and whenever a pane switches file: a
   // change can arrive from a phone over Sync with nothing local to announce it.

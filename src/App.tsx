@@ -12,7 +12,7 @@ import { ParticleBackground } from '@/ui/ParticleBackground'
 import { PrivacyNotice } from '@/ui/PrivacyNotice'
 import { MobileGate } from '@/ui/project/MobileGate'
 import { OpenProject } from '@/ui/project/OpenProject'
-import { ProjectShell } from '@/ui/project/ProjectShell'
+import { type ProjectOutput, ProjectShell } from '@/ui/project/ProjectShell'
 import { useProjectOpening } from '@/ui/project/useProjectOpening'
 import { ResultDialog } from '@/ui/ResultDialog'
 
@@ -36,9 +36,10 @@ export default function App() {
   const mode = useStore((s) => s.mode)
   const closeProject = useStore((s) => s.closeProject)
   const opening = useProjectOpening()
-  // The project's own `.tex`, lifted so the ActionBar can render and download
-  // it exactly as it does a single document's.
-  const [projectTex, setProjectTex] = useState('')
+  // The project's conversion, lifted so the ActionBar can render and download
+  // it exactly as it does a single document's — including its FIGURES, which
+  // live in the folder rather than in this browser's image store.
+  const [projectOutput, setProjectOutput] = useState<ProjectOutput | null>(null)
   // Whether the "open a book" screen is showing. A screen rather than jumping
   // straight to the OS picker, because a remembered folder has to be OFFERED
   // — permission needs a gesture — and a browser that cannot do this at all
@@ -88,8 +89,17 @@ export default function App() {
   // In project mode the conversion belongs to the shell — it needs the
   // project's own config and its figure resolver, neither of which exists
   // here — so the ActionBar reads whichever `.tex` the current mode produced.
-  const tex = inProject ? projectTex : single.tex
-  const { diagnostics, images } = single
+  const tex = inProject ? (projectOutput?.tex ?? '') : single.tex
+  const { diagnostics } = single
+  const images = inProject ? (projectOutput?.images ?? []) : single.images
+  // Whichever mode is active, this is how its figures are fetched.
+  const loadFigures = useCallback(
+    () =>
+      inProject
+        ? (projectOutput?.loadImages() ?? Promise.resolve([]))
+        : loadImages(images),
+    [inProject, projectOutput, images],
+  )
   const compile = useCompile()
 
   const save = (blob: Blob, extension: string) => {
@@ -110,7 +120,7 @@ export default function App() {
    * `.tex`, because a zip containing a single file is a worse thing to receive.
    */
   const downloadTex = async () => {
-    const attached = await loadImages(images)
+    const attached = await loadFigures()
     if (attached.length === 0) {
       save(new Blob([tex], { type: 'application/x-tex' }), 'tex')
       return
@@ -135,7 +145,7 @@ export default function App() {
     // Only what this document actually draws. A reader who has attached twenty
     // figures over a week should not push all twenty through the engine to
     // render the one page that uses two.
-    compile.compile(tex, await loadImages(images))
+    compile.compile(tex, await loadFigures())
   }
 
   return (
@@ -164,9 +174,9 @@ export default function App() {
           <ErrorBoundary
             onRecover={closeProject}
             recoverLabel="Close the project"
-            rescue={() => projectTex || null}
+            rescue={() => projectOutput?.tex || null}
           >
-            <ProjectShell onRenderPdf={() => {}} onTex={setProjectTex} />
+            <ProjectShell onOutput={setProjectOutput} />
           </ErrorBoundary>
         ) : openingProject ? (
           <OpenProject
