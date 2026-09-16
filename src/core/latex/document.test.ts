@@ -197,6 +197,24 @@ describe('convertProject', () => {
     expect(tex).not.toContain('[^a]: Note A')
     expect(tex).not.toContain('[^b]: Note B')
   })
+
+  // Review finding: appending shared definitions to the END of a part's
+  // source is swallowed whole when that part ends inside an unterminated
+  // construct — an unclosed ``` fence consumes to end-of-file, so the
+  // appended `[ref]: ...` definition line is printed as literal text inside
+  // the reader's code block instead of resolving invisibly. Placing the
+  // definitions at the TOP of the body instead means nothing earlier in the
+  // file can swallow them.
+  it('never prints a definition appended after an unclosed fence in another part', () => {
+    const { tex } = convertProject(
+      [
+        part('01-a.md', '# A\n\nSee [the site][ref].\n\n```\nunclosed fence\n', 'main'),
+        part('02-b.md', '# B\n\n[ref]: https://example.com\n', 'main'),
+      ],
+      book,
+    )
+    expect(tex).not.toContain('[ref]:')
+  })
 })
 
 describe('matter divisions', () => {

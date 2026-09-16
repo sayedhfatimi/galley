@@ -12,6 +12,7 @@ import { type GalleyConfig, type Metadata, usesMatter } from '../config'
 import type { Diagnostic } from '../diagnostics'
 import { extractFrontmatter, hasFrontmatter } from '../markdown/frontmatter'
 import { parseMarkdown } from '../markdown/parse'
+import { joinFrontmatter, splitFrontmatter } from '../markdown/split'
 import { sharedDefinitions } from '../project/definitions'
 import type { FigureResolver, ProjectPart } from '../project/types'
 import { buildPreamble } from './preamble'
@@ -118,9 +119,22 @@ export function convertProject(
   // see `sharedDefinitions`'s doc comment for why a reference resolves only
   // against a definition in the SAME parsed source.
   const shared = sharedDefinitions(parts.map((part) => part.source))
+
+  // Placed at the TOP of the body, not appended. A markdown definition is
+  // document-scoped wherever it sits, and it serialises to nothing — but an
+  // APPENDED block is swallowed whole by an unterminated construct. Measured:
+  // a chapter ending in an unclosed ``` fence printed another chapter's
+  // `[ref]: https://example.com` verbatim inside the reader's code block.
+  // Nothing earlier in the file can swallow a definition placed first.
+  const withDefinitions = (source: string): string => {
+    if (shared === '') return source
+    const { frontmatter, body } = splitFrontmatter(source)
+    return joinFrontmatter(frontmatter, `${shared}\n\n${body}`)
+  }
+
   const result = serializeParts(
     parts.map((part) => ({
-      tree: parseMarkdown(shared === '' ? part.source : `${part.source}\n\n${shared}`),
+      tree: parseMarkdown(withDefinitions(part.source)),
       spec: part.spec,
       path: part.path,
     })),
