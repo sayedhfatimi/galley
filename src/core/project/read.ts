@@ -8,11 +8,12 @@
  * files. What they never reach is the typeset output.
  */
 
-import type { Metadata } from '../config'
+import type { GalleyConfig, Metadata } from '../config'
 import { DiagnosticCollector } from '../diagnostics'
 import { SUPPORTED_IMAGE_EXTENSIONS } from '../images'
 import { extractFrontmatter, frontmatterData } from '../markdown/frontmatter'
 import { parseMarkdown } from '../markdown/parse'
+import { readBookConfig } from './config'
 import { partOrder } from './order'
 import { isPart, readPartSpec } from './spec'
 import type { Project, ProjectNote, ProjectPart } from './types'
@@ -52,12 +53,15 @@ export function readProject(
   const book = byPath.get(BOOK_FILE)
 
   let metadata: Metadata = {}
+  let config: Partial<GalleyConfig> = {}
   if (book) {
     const tree = parseMarkdown(book.source)
+    const data = frontmatterData(tree)
     metadata = extractFrontmatter(tree)
+    config = readBookConfig(data)
     // `book.md` is the book, never a chapter of it. An author who copies a
     // chapter's frontmatter in would otherwise see nothing happen at all.
-    if (isPart(frontmatterData(tree))) {
+    if (isPart(data)) {
       diagnostics.add(
         'project-book-not-a-part',
         'book.md holds the book’s own settings and is never a chapter, so its galley: block does nothing. Use book: for the book’s settings.',
@@ -95,5 +99,5 @@ export function readProject(
 
   const figures = partOrder(assetPaths.filter((p) => !hidden(p) && isImage(p)))
 
-  return { parts, notes, figures, metadata, diagnostics: diagnostics.list() }
+  return { parts, notes, figures, metadata, config, diagnostics: diagnostics.list() }
 }

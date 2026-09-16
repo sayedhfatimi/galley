@@ -51,6 +51,29 @@ describe('readProject', () => {
     expect(project.metadata).toMatchObject({ title: 'The Book', author: 'A. Writer' })
   })
 
+  it('reads config from book.md’s book: block', () => {
+    const project = readProject(
+      [
+        {
+          path: 'book.md',
+          source: '---\ntitle: T\nbook:\n  character: book\n  two_sided: true\n---\n',
+        },
+      ],
+      [],
+    )
+    expect(project.config).toEqual({ character: 'book', twoSided: true })
+  })
+
+  it('has an empty config when book.md has no book: block', () => {
+    const project = readProject([{ path: 'book.md', source: '---\ntitle: T\n---\n' }], [])
+    expect(project.config).toEqual({})
+  })
+
+  it('has an empty config when there is no book.md at all', () => {
+    const project = readProject([{ path: '01-a.md', source: part('main') }], [])
+    expect(project.config).toEqual({})
+  })
+
   it('skips dotfolders entirely, including .obsidian', () => {
     const project = readProject(
       [

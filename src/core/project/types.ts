@@ -1,6 +1,6 @@
 /** The shapes a folder project is read into. Pure — no DOM. */
 
-import type { Metadata } from '../config'
+import type { GalleyConfig, Metadata } from '../config'
 import type { Diagnostic } from '../diagnostics'
 import type { PartSpec } from '../structure'
 
@@ -25,6 +25,8 @@ export interface Project {
   /** Project-relative paths of every image file found. */
   figures: string[]
   metadata: Metadata
+  /** The book's settings from `book.md`, to be layered over a preset. */
+  config: Partial<GalleyConfig>
   diagnostics: Diagnostic[]
 }
 
