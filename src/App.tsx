@@ -3,12 +3,17 @@ import { convert, readFrontmatter } from '@/core/latex/document'
 import { createZip } from '@/core/zip'
 import { ActionBar } from '@/ui/ActionBar'
 import { Diagnostics } from '@/ui/Diagnostics'
+import { ErrorBoundary } from '@/ui/ErrorBoundary'
 import { MarkdownEditor } from '@/ui/editor/MarkdownEditor'
 import { listImageNames, loadImages } from '@/ui/lib/imageStore'
 import { useStore } from '@/ui/lib/store'
 import { useCompile } from '@/ui/lib/useCompile'
 import { ParticleBackground } from '@/ui/ParticleBackground'
 import { PrivacyNotice } from '@/ui/PrivacyNotice'
+import { MobileGate } from '@/ui/project/MobileGate'
+import { OpenProject } from '@/ui/project/OpenProject'
+import { ProjectShell } from '@/ui/project/ProjectShell'
+import { useProjectOpening } from '@/ui/project/useProjectOpening'
 import { ResultDialog } from '@/ui/ResultDialog'
 
 /**
@@ -28,6 +33,18 @@ export default function App() {
   const setFileName = useStore((s) => s.setFileName)
   const applyFrontmatter = useStore((s) => s.applyFrontmatter)
   const setResultOpen = useStore((s) => s.setResultOpen)
+  const mode = useStore((s) => s.mode)
+  const closeProject = useStore((s) => s.closeProject)
+  const opening = useProjectOpening()
+  // The project's own `.tex`, lifted so the ActionBar can render and download
+  // it exactly as it does a single document's.
+  const [projectTex, setProjectTex] = useState('')
+  // Whether the "open a book" screen is showing. A screen rather than jumping
+  // straight to the OS picker, because a remembered folder has to be OFFERED
+  // — permission needs a gesture — and a browser that cannot do this at all
+  // needs somewhere to say so.
+  const [openingProject, setOpeningProject] = useState(false)
+  const inProject = mode === 'project'
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -35,14 +52,19 @@ export default function App() {
 
   // Frontmatter fills only the fields the reader has not set themselves, so
   // their own edits survive the next keystroke in the document.
+  //
+  // Gated on document mode. A project's metadata comes from `book.md` into
+  // the SESSION's config; letting this run would write the single document's
+  // title and author over the book's, and `config` is one persisted field.
   const lastFrontmatter = useRef('')
   useEffect(() => {
+    if (inProject) return
     const found = readFrontmatter(source)
     const key = JSON.stringify(found)
     if (key === lastFrontmatter.current) return
     lastFrontmatter.current = key
     if (Object.keys(found).length > 0) applyFrontmatter(found)
-  }, [source, applyFrontmatter])
+  }, [source, applyFrontmatter, inProject])
 
   /**
    * The images this browser actually holds bytes for.
@@ -59,10 +81,15 @@ export default function App() {
   }, [])
   useEffect(refreshAttached, [refreshAttached])
 
-  const { tex, diagnostics, images } = useMemo(
+  const single = useMemo(
     () => convert(source, config, attached ? new Set(attached) : undefined),
     [source, config, attached],
   )
+  // In project mode the conversion belongs to the shell — it needs the
+  // project's own config and its figure resolver, neither of which exists
+  // here — so the ActionBar reads whichever `.tex` the current mode produced.
+  const tex = inProject ? projectTex : single.tex
+  const { diagnostics, images } = single
   const compile = useCompile()
 
   const save = (blob: Blob, extension: string) => {
@@ -112,7 +139,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <MobileGate>
       <ParticleBackground theme={theme} />
 
       <div className="relative z-10 flex h-screen flex-col overflow-hidden">
@@ -122,18 +149,48 @@ export default function App() {
           busy={compile.state === 'running'}
           onRender={render}
           onDownloadTex={downloadTex}
+          projectName={inProject ? (opening.remembered?.name ?? 'project') : null}
+          canOpenProject={opening.supported}
+          onOpenProject={() => setOpeningProject(true)}
+          onCloseProject={() => {
+            closeProject()
+            setOpeningProject(false)
+          }}
         />
 
-        <main className="flex min-h-0 flex-1 flex-col px-4 py-4">
-          <MarkdownEditor
-            value={source}
-            onChange={setSource}
-            onFileName={(name) => setFileName(name.replace(/\.[^.]+$/, ''))}
-            onImagesChanged={refreshAttached}
+        {inProject ? (
+          // Scoped to the project surface: a throw here would otherwise
+          // unmount the root with unsaved text in an editor.
+          <ErrorBoundary
+            onRecover={closeProject}
+            recoverLabel="Close the project"
+            rescue={() => projectTex || null}
+          >
+            <ProjectShell onRenderPdf={() => {}} onTex={setProjectTex} />
+          </ErrorBoundary>
+        ) : openingProject ? (
+          <OpenProject
+            supported={opening.supported}
+            remembered={opening.remembered}
+            busy={opening.busy}
+            error={opening.error}
+            onPick={() => void opening.pick()}
+            onReopen={() => void opening.reopen()}
+            onForget={() => void opening.forget()}
+            onCancel={() => setOpeningProject(false)}
           />
-        </main>
+        ) : (
+          <main className="flex min-h-0 flex-1 flex-col px-4 py-4">
+            <MarkdownEditor
+              value={source}
+              onChange={setSource}
+              onFileName={(name) => setFileName(name.replace(/\.[^.]+$/, ''))}
+              onImagesChanged={refreshAttached}
+            />
+          </main>
+        )}
 
-        {diagnostics.length > 0 && (
+        {!inProject && diagnostics.length > 0 && (
           <div className="max-h-32 shrink-0 overflow-auto border-t px-4 py-2">
             <Diagnostics items={diagnostics} />
           </div>
@@ -143,6 +200,6 @@ export default function App() {
       </div>
 
       <ResultDialog compile={compile} onDownloadTex={downloadTex} />
-    </>
+    </MobileGate>
   )
 }

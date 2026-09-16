@@ -1,4 +1,4 @@
-import { Download, FileText, Loader2 } from 'lucide-react'
+import { Download, FileText, FolderOpen, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import { ConfigDialog } from './ConfigDialog'
@@ -21,6 +21,11 @@ export interface ActionBarProps {
   hasImages: boolean
   onRender: () => void
   onDownloadTex: () => void
+  /** The open folder's name, or null in single-document mode. */
+  projectName: string | null
+  canOpenProject: boolean
+  onOpenProject: () => void
+  onCloseProject: () => void
 }
 
 export function ActionBar({
@@ -29,6 +34,10 @@ export function ActionBar({
   hasImages,
   onRender,
   onDownloadTex,
+  projectName,
+  canOpenProject,
+  onOpenProject,
+  onCloseProject,
 }: ActionBarProps) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b bg-background/80 px-4 backdrop-blur">
@@ -47,12 +56,28 @@ export function ActionBar({
             </span>
           </div>
           <p className="mt-0.5 truncate text-muted-foreground text-xs">
-            Markdown in, a typeset PDF and the LaTeX that made it out.
+            {projectName ?? 'Markdown in, a typeset PDF and the LaTeX that made it out.'}
           </p>
         </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        {/* Project actions sit here, spanning everything, because a folder is
+            neither one editor's business nor the formatting toolbar's. */}
+        {projectName ? (
+          <Button variant="ghost" size="sm" onClick={onCloseProject}>
+            <X className="size-3.5" />
+            Close
+          </Button>
+        ) : (
+          canOpenProject && (
+            <Button variant="ghost" size="sm" onClick={onOpenProject}>
+              <FolderOpen className="size-3.5" />
+              Open a book
+            </Button>
+          )
+        )}
+
         <LatexDialog tex={tex} onDownload={onDownloadTex} />
 
         {/* Always available, never behind a dialog: a failed render must still
