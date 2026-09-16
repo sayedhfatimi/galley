@@ -124,3 +124,85 @@ describe('buildFigureResolver', () => {
     expect(r('x.png', 'nowhere/chapter.md')).toBe('art/x.png')
   })
 })
+
+/**
+ * Percent-encoding, which is what Obsidian writes into `![](…)` when wikilinks
+ * are turned off. `normalise` never decoded, so a figure that displays
+ * perfectly in the author's vault silently failed to resolve in galley — and
+ * "resolves in Obsidian, breaks in galley" is the exact problem folder
+ * projects exist to remove.
+ */
+describe('buildFigureResolver — percent-encoded references', () => {
+  const resolve = buildFigureResolver([
+    'figures/my file.png',
+    'ch1/a+b.png',
+    'ch2/100% done.png',
+  ])
+
+  it.each([
+    ['a space', 'figures/my%20file.png', 'figures/my file.png'],
+    [
+      'a space, from the referring directory',
+      '../figures/my%20file.png',
+      'figures/my file.png',
+    ],
+    ['a plus, which is NOT a space in a path', 'ch1/a+b.png', 'ch1/a+b.png'],
+    ['an encoded percent', 'ch2/100%25%20done.png', 'ch2/100% done.png'],
+  ])('resolves %s', (_name, reference, expected) => {
+    expect(resolve(reference, 'ch1/chapter.md')).toBe(expected)
+  })
+
+  /**
+   * `decodeURIComponent` THROWS on a malformed escape, and `src/core` never
+   * throws — a broken reference in one chapter must not take down the
+   * conversion of the whole book. Each of these is a real thing a hand-typed
+   * path can contain.
+   */
+  it.each([
+    ['a truncated escape', 'figures/%zz.png'],
+    ['a lone percent', 'figures/100%.png'],
+    ['a trailing percent', 'figures/x%'],
+    ['an incomplete pair', 'figures/%A'],
+  ])('does not throw on %s', (_name, reference) => {
+    expect(() => resolve(reference, 'ch1/chapter.md')).not.toThrow()
+  })
+
+  /**
+   * Decoding must be per SEGMENT. `%2F` is a literal slash inside a filename,
+   * and decoding the whole path at once would turn it into a directory
+   * separator and resolve to a file the author never named.
+   */
+  it('does not let an encoded slash become a path separator', () => {
+    const resolver = buildFigureResolver(['ch1/a/b.png', 'ch1/a%2Fb.png'])
+    expect(resolver('a%2Fb.png', 'ch1/chapter.md')).not.toBe('ch1/a/b.png')
+  })
+})
+
+/**
+ * Obsidian resolves an embed by name case-insensitively, so `![[Diagram.png]]`
+ * finds `diagram.png` there and missed it here.
+ *
+ * Only the by-NAME fallback folds case. An exact path is a real filesystem
+ * entry and a real filesystem entry has a real name — folding there would let
+ * `![](Diagram.png)` silently resolve to a different file on a case-sensitive
+ * disk.
+ */
+describe('buildFigureResolver — case', () => {
+  it('finds a figure by name whatever the casing', () => {
+    const resolve = buildFigureResolver(['ch1/diagram.png', 'figures/Cover.PNG'])
+    expect(resolve('Diagram.png', 'ch9/chapter.md')).toBe('ch1/diagram.png')
+    expect(resolve('cover.png', 'ch9/chapter.md')).toBe('figures/Cover.PNG')
+  })
+
+  it('prefers the exact-cased path over a name-folded match', () => {
+    const resolve = buildFigureResolver(['Diagram.png', 'a/diagram.png'])
+    expect(resolve('Diagram.png', 'chapter.md')).toBe('Diagram.png')
+    expect(resolve('diagram.png', 'chapter.md')).toBe('a/diagram.png')
+  })
+
+  it('still breaks a folded collision deterministically', () => {
+    const one = buildFigureResolver(['b/Diagram.png', 'a/diagram.png'])
+    const other = buildFigureResolver(['a/diagram.png', 'b/Diagram.png'])
+    expect(one('DIAGRAM.PNG', 'ch/x.md')).toBe(other('DIAGRAM.PNG', 'ch/x.md'))
+  })
+})
