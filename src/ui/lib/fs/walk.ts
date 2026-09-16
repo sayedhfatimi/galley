@@ -29,6 +29,13 @@ export interface ProjectContents {
   assetPaths: string[]
   /** Every readable file, by project-relative path, for reading and writing later. */
   handles: Map<string, FileSystemFileHandle>
+  /**
+   * When each Markdown file was last written, captured during the read that
+   * was happening anyway. Every later write is checked against this, and
+   * re-reading the whole project to learn it would be a second pass over the
+   * disk for something already in hand.
+   */
+  modified: Map<string, number>
   /** Files skipped for being too large, so the UI can say so rather than lose them silently. */
   skipped: string[]
 }
@@ -60,6 +67,7 @@ export async function walkProject(
   const markdown: SourceFile[] = []
   const assetPaths: string[] = []
   const handles = new Map<string, FileSystemFileHandle>()
+  const modified = new Map<string, number>()
   const skipped: string[] = []
 
   const descend = async (directory: FileSystemDirectoryHandle, prefix: string) => {
@@ -98,6 +106,7 @@ export async function walkProject(
             continue
           }
           markdown.push({ path, source: await file.text() })
+          modified.set(path, file.lastModified)
         } catch {
           handles.delete(path)
         }
@@ -108,5 +117,5 @@ export async function walkProject(
   }
 
   await descend(root, '')
-  return { markdown, assetPaths, handles, skipped }
+  return { markdown, assetPaths, handles, modified, skipped }
 }
