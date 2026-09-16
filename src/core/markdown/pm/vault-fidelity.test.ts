@@ -217,6 +217,18 @@ describe('normalises formatting (accepted, and what rich mode warns about)', () 
     ['underscore emphasis', '_emphasis_\n', '*emphasis*\n'],
     ['star bullets', '* one\n* two\n', '- one\n- two\n'],
     ['a loose list', '- one\n\n- two\n', '- one\n- two\n'],
+    ['indented code into a fence', '    indented\n', '```\nindented\n```\n'],
+    ['a star thematic break', '***\n', '---\n'],
+    ['nested mark order', '~~*both*~~\n', '*~~both~~*\n'],
+    ['an entity into its character', 'AT&amp;T and &copy;\n', 'AT\\&T and \u00a9\n'],
+    ['parentheses in a URL', '[a](http://x.com/a(b))\n', '[a](http://x.com/a\\(b\\))\n'],
+    // The footnote's text survives; its paragraph break does not, because
+    // `footnoteContentToPm` flattens the definition's blocks into one.
+    [
+      'a multi-paragraph footnote into one',
+      'T[^1]\n\n[^1]: one\n\n    two\n',
+      'T[^1]\n\n[^1]: one two\n',
+    ],
     ['an intraword underscore', 'Cost 100% of a_b\n', 'Cost 100% of a\\_b\n'],
     // The DEFINITION survives; only the reference form is normalised, so the
     // link still resolves and nothing is lost. Carrying the reference form on
