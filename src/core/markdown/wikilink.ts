@@ -16,9 +16,6 @@ import type { Image, Parent, PhrasingContent, Root, Text } from 'mdast'
 /** `![[target]]` or `![[target|alias]]`, with no nested brackets. */
 const EMBED = /!\[\[([^\]|\n]+?)(?:\|([^\]\n]*))?\]\]/g
 
-/** Node types whose text is literal and must not be rewritten. */
-const OPAQUE = new Set(['code', 'inlineCode', 'math', 'inlineMath', 'yaml', 'html'])
-
 function split(node: Text): PhrasingContent[] | null {
   EMBED.lastIndex = 0
   if (!EMBED.test(node.value)) return null
@@ -52,10 +49,13 @@ export function applyWikilinkEmbeds(tree: Root): void {
     let changed = false
 
     for (const child of parent.children) {
-      if (OPAQUE.has(child.type)) {
-        rebuilt.push(child)
-        continue
-      }
+      // No opaque-node guard is needed, and one would be inert. Measured:
+      // `code`, `inlineCode`, `math`, `inlineMath`, `yaml` and `html` are all
+      // mdast LEAF nodes — they carry a `value` string and have no `children`
+      // — so the walk never descends into them and their content never reaches
+      // this loop as a `text` node. A guard listing them would be a control
+      // that does nothing, which is a bug shape this project has already fixed
+      // twice. The code-block tests below pin the behaviour regardless.
       if (child.type === 'text') {
         const pieces = split(child as Text)
         if (pieces === null) {
