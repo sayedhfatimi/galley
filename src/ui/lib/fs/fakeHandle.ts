@@ -96,7 +96,29 @@ export function fakeFs(initial: Record<string, string | FakeFile>): FakeFs {
         let buffer = ''
         return {
           write: async (data: unknown) => {
-            buffer += typeof data === 'string' ? data : String(data)
+            // Binary as well as text: a figure is written as bytes, and a fake
+            // that stringified them would report `[object ArrayBuffer]` and
+            // make every assertion about written content meaningless.
+            if (typeof data === 'string') {
+              buffer += data
+            } else if (ArrayBuffer.isView(data)) {
+              buffer += new TextDecoder().decode(
+                new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+              )
+            } else if (
+              typeof data === 'object' &&
+              data !== null &&
+              'byteLength' in data
+            ) {
+              // Structural, not `instanceof ArrayBuffer`: jsdom and Node are
+              // different realms here, so a buffer created in one fails the
+              // check in the other and the bytes come out as
+              // "[object ArrayBuffer]" — which makes every assertion about
+              // written content quietly meaningless.
+              buffer += new TextDecoder().decode(new Uint8Array(data as ArrayBuffer))
+            } else {
+              buffer += String(data)
+            }
           },
           close: async () => {
             const previous = files.get(path)?.lastModified ?? DEFAULT_MTIME

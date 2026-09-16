@@ -14,6 +14,7 @@ import { MobileGate } from '@/ui/project/MobileGate'
 import { OpenProject } from '@/ui/project/OpenProject'
 import { type ProjectOutput, ProjectShell } from '@/ui/project/ProjectShell'
 import { useProjectOpening } from '@/ui/project/useProjectOpening'
+import { writePdf } from '@/ui/project/writeFigure'
 import { ResultDialog } from '@/ui/ResultDialog'
 
 /**
@@ -36,6 +37,7 @@ export default function App() {
   const mode = useStore((s) => s.mode)
   const closeProject = useStore((s) => s.closeProject)
   const opening = useProjectOpening()
+  const session = useStore((s) => s.session)
   // The project's conversion, lifted so the ActionBar can render and download
   // it exactly as it does a single document's — including its FIGURES, which
   // live in the folder rather than in this browser's image store.
@@ -211,7 +213,20 @@ export default function App() {
         <PrivacyNotice />
       </div>
 
-      <ResultDialog compile={compile} onDownloadTex={downloadTex} />
+      <ResultDialog
+        compile={compile}
+        onDownloadTex={downloadTex}
+        onSaveToFolder={
+          inProject && session
+            ? async () => {
+                const bytes = compile.pdfUrl
+                  ? await (await fetch(compile.pdfUrl)).arrayBuffer()
+                  : null
+                return bytes ? writePdf(session.handle, 'book.pdf', bytes) : false
+              }
+            : undefined
+        }
+      />
     </MobileGate>
   )
 }

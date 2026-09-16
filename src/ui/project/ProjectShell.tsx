@@ -15,11 +15,13 @@ import { Diagnostics } from '@/ui/Diagnostics'
 import { type EditorMode, EditorPane } from '@/ui/editor/EditorPane'
 import { type PaneSide, useStore } from '@/ui/lib/store'
 import { ConflictBar } from './ConflictBar'
+import { FigureDialog, NameFigureDialog } from './FigureDialog'
 import { buildFigureIndex, loadProjectFigures } from './figures'
 import { applyMembership, type Membership } from './membership'
 import { SharedToolbar } from './SharedToolbar'
 import { Sidebar } from './Sidebar'
 import { useAutosave } from './useAutosave'
+import { directoryOf, relativeReference, writeFigure } from './writeFigure'
 
 /**
  * The project surface: the book on the left, two editors beside it.
@@ -83,6 +85,14 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
     left: null,
     right: null,
   })
+  const [picking, setPicking] = useState(false)
+  const [clash, setClash] = useState<{
+    name: string
+    suggestion: string
+    bytes: ArrayBuffer
+    into: string
+  } | null>(null)
+  const [figureError, setFigureError] = useState<string | null>(null)
 
   const handles = session?.handles ?? new Map()
   const files = session?.files ?? new Map()
@@ -204,6 +214,75 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
     })
   }, [conversion, figures, handles, onOutput, session, changeConfig])
 
+  /**
+   * A dropped picture becomes a file in the author's folder, beside the
+   * chapter that received it — which is where an author would have put it, and
+   * what makes the relative reference short.
+   *
+   * The existence check asks the DISK rather than the figure list read when
+   * the project opened: another device may have added the file since, and a
+   * five-minute-old list is exactly what would let this overwrite it.
+   */
+  const addFigures = useCallback(
+    async (files: File[], into: string, insert: (reference: string) => void) => {
+      if (!session) return
+      for (const file of files) {
+        const bytes = await file.arrayBuffer()
+        const directory = directoryOf(into)
+        const name = file.name || 'image.png'
+        const path = [...directory, name].join('/')
+        const result = await writeFigure(session.handle, { path, directory, name }, bytes)
+
+        if (result.ok) {
+          insert(relativeReference(into, result.path))
+          setFigureError(null)
+          continue
+        }
+        if (result.reason === 'exists') {
+          setClash({ name, suggestion: result.suggestion, bytes, into })
+          return
+        }
+        setFigureError(
+          result.reason === 'unsupported'
+            ? result.message
+            : `${name} could not be written into the folder.`,
+        )
+        return
+      }
+    },
+    [session],
+  )
+
+  /**
+   * Put a reference where the author is working.
+   *
+   * Two routes, because a project opens in SOURCE mode: the rich editor takes
+   * a node, and the textarea takes text at the caret. Inserting into the rich
+   * editor only would have made the figure button silently do nothing in the
+   * mode that is actually the default.
+   */
+  const insertFigure = useCallback(
+    (side: PaneSide, reference: string) => {
+      const path = session?.panes[side]
+      if (!path) return
+      const editor = editors[side]
+      if (mode === 'rich' && editor) {
+        editor
+          .chain()
+          .focus()
+          .insertContent({ type: 'image', attrs: { src: reference } })
+          .run()
+        return
+      }
+      const source = sources.get(path) ?? ''
+      edit(
+        path,
+        `${source}${source.endsWith('\n') || source === '' ? '' : '\n'}\n![](${reference})\n`,
+      )
+    },
+    [session, editors, mode, sources, edit],
+  )
+
   const toggleMode = useCallback(() => {
     setMode((m) => {
       if (m === 'source' && !richWarned) setRichWarned(true)
@@ -256,6 +335,7 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
           onEditor={(editor) =>
             setEditors((e) => (e[side] === editor ? e : { ...e, [side]: editor }))
           }
+          onImages={(files) => addFigures(files, path, (ref) => insertFigure(side, ref))}
           ariaLabel={`${path} (Markdown source)`}
         />
       </div>
@@ -288,6 +368,7 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
             mode={mode}
             activeName={activePath}
             onToggleMode={toggleMode}
+            onAddFigure={() => setPicking(true)}
             hasRight={session.panes.right !== null}
           />
           {mode === 'rich' && richWarned && (
@@ -313,6 +394,48 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
           </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
+
+      <FigureDialog
+        open={picking}
+        onOpenChange={setPicking}
+        figures={session.project.figures}
+        referenceFor={(figure) => relativeReference(activePath ?? '', figure)}
+        onInsert={(reference) => insertFigure(session.lastFocused, reference)}
+      />
+
+      <NameFigureDialog
+        clash={clash}
+        onCancel={() => setClash(null)}
+        onConfirm={async (name) => {
+          const pending = clash
+          setClash(null)
+          if (!pending) return
+          const directory = directoryOf(pending.into)
+          const path = [...directory, name].join('/')
+          const result = await writeFigure(
+            session.handle,
+            { path, directory, name },
+            pending.bytes,
+          )
+          if (result.ok) {
+            insertFigure(
+              session.lastFocused,
+              relativeReference(pending.into, result.path),
+            )
+            setFigureError(null)
+          } else if (result.reason === 'exists') {
+            setClash({ ...pending, name, suggestion: result.suggestion })
+          } else {
+            setFigureError(`${name} could not be written into the folder.`)
+          }
+        }}
+      />
+
+      {figureError && (
+        <p className="shrink-0 border-t px-4 py-2 text-destructive text-xs">
+          {figureError}
+        </p>
+      )}
 
       {conversion && conversion.diagnostics.length > 0 && (
         <div className="max-h-32 shrink-0 overflow-auto border-t px-4 py-2">

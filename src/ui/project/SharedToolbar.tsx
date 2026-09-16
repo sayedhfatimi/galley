@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/core'
-import { Code, PenLine } from 'lucide-react'
+import { Code, ImagePlus, PenLine } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { EditorMode } from '@/ui/editor/EditorPane'
 import { Toolbar } from '@/ui/editor/Toolbar'
@@ -46,6 +46,15 @@ export interface SharedToolbarProps {
   /** What the toolbar will act on, said in words as well as position. */
   activeName: string | null
   onToggleMode: () => void
+  /**
+   * Opens the project's figure picker.
+   *
+   * A project's figures are files the author already has, so this lists them
+   * rather than opening a file dialog that would copy one in again. It stays
+   * in the toolbar in BOTH modes, because inserting a reference is meaningful
+   * in source mode too — unlike the formatting controls.
+   */
+  onAddFigure: () => void
   /** Only the right pane can be empty, so only it can be absent. */
   hasRight: boolean
 }
@@ -56,6 +65,7 @@ export function SharedToolbar({
   mode,
   activeName,
   onToggleMode,
+  onAddFigure,
   hasRight,
 }: SharedToolbarProps) {
   const indicator = (
@@ -68,6 +78,11 @@ export function SharedToolbar({
           {activeName}
         </span>
       )}
+      <ToolbarButton
+        icon={<ImagePlus className="size-4" />}
+        label="Add a figure"
+        onClick={onAddFigure}
+      />
       <ToolbarButton
         icon={
           mode === 'rich' ? <Code className="size-4" /> : <PenLine className="size-4" />
