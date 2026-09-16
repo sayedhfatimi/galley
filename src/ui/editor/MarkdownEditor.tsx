@@ -1,6 +1,6 @@
-import { EditorContent, useEditor } from '@tiptap/react'
+import type { Editor } from '@tiptap/core'
 import { CircleHelp, FileUp, PenLine, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -10,60 +10,46 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Textarea } from '@/components/ui/textarea'
-import { parseMarkdown } from '@/core/markdown/parse'
-import { mdastToPm } from '@/core/markdown/pm/mdast-to-pm'
-import { serializeToMarkdown } from '@/core/markdown/pm/serialize'
-import { bodyTree, joinFrontmatter, splitFromTree } from '@/core/markdown/split'
-import { cn } from '@/lib/utils'
 import { pruneImages } from '@/ui/lib/imageStore'
-import { attachImage, imageFilesFrom } from './attachImage'
-import { EditorStatusBar } from './EditorStatusBar'
-import { EditorToc } from './EditorToc'
-import { createExtensions } from './extensions'
+import { attachImage } from './attachImage'
+import { type EditorMode, EditorPane } from './EditorPane'
 import { HelpDialog } from './HelpDialog'
-import { LinkDialog } from './LinkDialog'
 import { Toolbar } from './Toolbar'
 import { ToolbarButton } from './ToolbarButton'
 
 /**
- * The writing surface.
+ * The single-document writing surface.
  *
- * Rich editing by default, with a raw-Markdown view one click away. The toggle
- * is not a nicety: Markdown is what galley actually converts, so a writer must
- * be able to see it — and if the ProseMirror round trip ever mangles a
- * construct, the source view is where that becomes visible rather than
- * surfacing for the first time in the PDF.
+ * One `EditorPane` plus the chrome that only makes sense for a document
+ * galley owns: opening a file as THE document, clearing it, help, and the
+ * browser-local image store. A folder project mounts the same pane twice and
+ * brings entirely different chrome, which is why none of this lives in the
+ * pane itself — in a project, "clear the document" has no meaning and
+ * `pruneImages` would delete figures that belong to the author's folder.
  *
- * Markdown remains the single source of truth. Edits serialise back to it,
- * debounced, so a keystroke does not run the whole conversion pipeline.
- *
- * There is deliberately no chrome row above the toolbar. Document actions live
- * in the toolbar itself: a second bar holding four buttons cost a strip of
- * vertical space and made the editor read as a panel inside a page rather than
- * as the surface itself.
+ * Rich editing by default here, because this document IS galley's: nothing is
+ * written back over a file anyone else owns, so the serialiser's canonical
+ * spelling costs nobody anything. A project opens in source mode for exactly
+ * the opposite reason.
  */
-const SERIALIZE_DEBOUNCE_MS = 300
 
-/** Generous enough for a book-length manuscript in plain text, which is smaller
- *  than most people assume, while bounding the cost of any one render. */
-export /**
+/** Generous enough for a book-length manuscript in plain text, while bounding
+ *  the cost of any one render. */
+const MAX_INPUT_BYTES = 2 * 1024 * 1024
+
+const ACCEPT = '.md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain'
+
+/**
  * Whether a file can sensibly be read as the document.
  *
  * Deliberately permissive about a MISSING type — plenty of sources supply none
  * for a plain `.md` — and strict about a type that is present and is not text.
  */
-function looksLikeText(file: File): boolean {
+export function looksLikeText(file: File): boolean {
   if (file.type.startsWith('text/')) return true
   if (file.type !== '' && file.type !== 'application/octet-stream') return false
   return /\.(md|markdown|mdown|mkd|txt)$/i.test(file.name) || file.name === ''
 }
-
-const MAX_INPUT_BYTES = 2 * 1024 * 1024
-
-const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf'
-
-const ACCEPT = '.md,.markdown,.mdown,.mkd,.txt,text/markdown,text/plain'
 
 export interface MarkdownEditorProps {
   value: string
@@ -79,138 +65,19 @@ export function MarkdownEditor({
   onFileName,
   onImagesChanged,
 }: MarkdownEditorProps) {
-  const [mode, setMode] = useState<'rich' | 'source'>('rich')
+  const [mode, setMode] = useState<EditorMode>('rich')
   const [tocOpen, setTocOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
-  const [dragging, setDragging] = useState(false)
   const [clearOpen, setClearOpen] = useState(false)
-  const [link, setLink] = useState({ open: false, href: '' })
   const [fileError, setFileError] = useState<string | null>(null)
+  const [editor, setEditor] = useState<Editor | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
-  const imageInput = useRef<HTMLInputElement>(null)
 
-  // Guards the feedback loop: the editor writes markdown up to the store, the
-  // store hands it back down. Without this the document would be reparsed and
-  // the cursor thrown to the start on every keystroke.
-  const emitting = useRef(false)
-  const timer = useRef<number | null>(null)
-
-  // The document is parsed once per `value`, not once per consumer: the
-  // frontmatter ref, the editor's initial content and the re-hydrate effect
-  // below all read from this rather than each calling `parseMarkdown` (via
-  // `splitFrontmatter`) on their own. Documents are accepted up to
-  // `MAX_INPUT_BYTES`, and a re-render that touches none of `value` — toggling
-  // `mode`, opening the TOC — must not re-run the parser.
-  const parsed = useMemo(() => {
-    const tree = parseMarkdown(value)
-    const { frontmatter, body } = splitFromTree(value, tree)
-    return { frontmatter, body, bodyTree: bodyTree(tree) }
-  }, [value])
-
-  // The block the editor is not being shown. Seeded from the initial value so
-  // the very first mount is consistent with every later re-hydrate; kept
-  // current by the re-hydrate effect below.
-  const frontmatter = useRef<string | null>(parsed.frontmatter)
-
-  // The body the editor's content was last synchronised with — the initial
-  // mount content, or the body of the most recent `setContent`/`onUpdate`.
-  //
-  // The re-hydrate effect below compares the INCOMING body against this,
-  // rather than re-serialising the editor's current content and comparing
-  // that (the old approach). Re-serialising only equals the source when the
-  // source is already in the serialiser's canonical spelling: `_em_` ->
-  // `*em*`, `* one` -> `- one`, a setext heading -> ATX are all routine in a
-  // file written by hand or exported from Obsidian, and none of them make
-  // the re-serialised form converge to `parsed.body` — so under the old
-  // guard, a dialog write that only changes `structure:` in the frontmatter
-  // (and therefore leaves the body byte-for-byte identical) still replaced
-  // the whole document via `setContent`, discarding the writer's selection,
-  // on every single such edit.
-  const syncedBody = useRef(parsed.body)
-
-  // Built once: changing the extension list would rebuild the whole editor and
-  // discard the document with it.
-  const extensions = useMemo(
-    () =>
-      createExtensions({
-        onRequestLink: (href) => setLink({ open: true, href }),
-        onRequestImage: () => imageInput.current?.click(),
-      }),
-    [],
-  )
-
-  // addImages needs the editor, and the editor's paste handler needs
-  // addImages. A ref breaks the cycle without rebuilding the editor, which
-  // would discard the document.
-  const pasteImages = useRef<((files: File[]) => Promise<void>) | null>(null)
-
-  const editor = useEditor({
-    extensions,
-    // The frontmatter is held aside rather than handed to the editor; see the
-    // re-hydrate effect below.
-    content: mdastToPm(parsed.bodyTree),
-    editorProps: {
-      attributes: {
-        class:
-          'prose-editor mx-auto h-full max-w-3xl px-6 py-8 text-sm focus:outline-none',
-      },
-      // A pasted screenshot arrives as a file on the clipboard with no name of
-      // its own. Handled here rather than left to ProseMirror, which would drop
-      // it silently — the same silence the image node was written to avoid.
-      handlePaste: (_view, event) => {
-        const files = imageFilesFrom(event.clipboardData?.items ?? null)
-        if (files.length === 0) return false
-        event.preventDefault()
-        void pasteImages.current?.(files)
-        return true
-      },
-    },
-    onUpdate: ({ editor }) => {
-      if (timer.current !== null) window.clearTimeout(timer.current)
-      timer.current = window.setTimeout(() => {
-        // The serialised markdown IS the new body, by definition — record it
-        // as synchronised before `onChange` feeds it back down as `value`, so
-        // the re-hydrate effect below recognises this as our own edit rather
-        // than an external change and does not re-run `setContent` on it.
-        const body = serializeToMarkdown(editor.getJSON() as never)
-        syncedBody.current = body
-        emitting.current = true
-        onChange(joinFrontmatter(frontmatter.current, body))
-        window.setTimeout(() => {
-          emitting.current = false
-        }, 0)
-      }, SERIALIZE_DEBOUNCE_MS)
-    },
-  })
-
-  // Re-hydrate only when the document's BODY changed underneath us — an
-  // upload, a restored session, or a paste into the source view — never on
-  // our own edits, and never on a dialog write that only touched frontmatter
-  // (the Structure section writes `structure:` back via `writeStructure`
-  // while leaving the body untouched, since the editor never sees the
-  // frontmatter in the first place — see `syncedBody` above).
-  useEffect(() => {
-    if (!editor || emitting.current) return
-    // Load-bearing regardless of whether the body changed: a frontmatter-only
-    // dialog write must still be picked up, or the next self-originated edit
-    // would serialise the STALE frontmatter back in.
-    frontmatter.current = parsed.frontmatter
-    if (parsed.body === syncedBody.current) return
-    editor.commands.setContent(mdastToPm(parsed.bodyTree) as never, {
-      emitUpdate: false,
-    })
-    syncedBody.current = parsed.body
-  }, [editor, parsed])
-
-  useEffect(() => {
-    return () => {
-      if (timer.current !== null) window.clearTimeout(timer.current)
-    }
-  }, [])
-
-  // The help dialog advertises this shortcut, so it has to exist. Bound on the
-  // window rather than through the editor keymap because help should open
-  // whether or not the caret is in the document.
+  // Bound on the window rather than through the editor keymap, because help
+  // should open whether or not the caret is in the document. It lives HERE and
+  // not in `EditorPane`: a folder project mounts two panes, and two
+  // registrations of a TOGGLE cancel each other out — the shortcut would look
+  // broken rather than doubled, which is the harder bug to find.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== '/' || !(event.metaKey || event.ctrlKey)) return
@@ -225,8 +92,8 @@ export function MarkdownEditor({
     setMode((m) => (m === 'rich' ? 'source' : 'rich'))
   }, [])
 
-  // Typing, uploading and dropping all converge here and produce identical
-  // results for identical content.
+  const openFile = useCallback(() => fileInput.current?.click(), [])
+
   const readFile = useCallback(
     async (file: File) => {
       if (file.size > MAX_INPUT_BYTES) {
@@ -235,14 +102,8 @@ export function MarkdownEditor({
         )
         return
       }
-      // Anything that is not plausibly text would be read as text and REPLACE
-      // the manuscript with its own bytes. That is how a dropped PDF used to
-      // destroy the document; the rule is now that an unreadable file is
-      // refused rather than silently substituted for the reader's work.
       if (!looksLikeText(file)) {
-        setFileError(
-          `${file.name || 'That file'} is not a Markdown or text file, so it has not been opened. Drop an image to add it as a figure.`,
-        )
+        setFileError(`${file.name} does not look like Markdown or plain text.`)
         return
       }
       setFileError(null)
@@ -253,9 +114,9 @@ export function MarkdownEditor({
   )
 
   /**
-   * Attached images, kept in this browser and inserted as figures. Sequential
-   * rather than parallel so the first failure — a full quota, say — stops
-   * before filling storage with the rest.
+   * Attached images, kept in this browser. Sequential rather than parallel so
+   * the first failure — a full quota, say — stops before filling storage with
+   * the rest.
    */
   const addImages = useCallback(
     async (files: File[]) => {
@@ -273,10 +134,6 @@ export function MarkdownEditor({
     [editor, onImagesChanged],
   )
 
-  pasteImages.current = addImages
-
-  const openFile = useCallback(() => fileInput.current?.click(), [])
-
   // Confirmed rather than immediate. The document is the only thing the reader
   // has here, it is restored from the last session, and there is no undo across
   // a reload — so a mis-click would be unrecoverable.
@@ -287,10 +144,46 @@ export function MarkdownEditor({
     onFileName?.('')
     editor?.commands.clearContent(true)
     // Clearing the document orphans its figures: nothing references them any
-    // more, and nothing ever will. Left alone they would sit in IndexedDB for
-    // the life of the browser profile, so this is the moment to reclaim them.
+    // more, and nothing ever will.
     void pruneImages([]).then(() => onImagesChanged?.())
   }, [editor, onChange, onFileName, onImagesChanged])
+
+  const chrome =
+    mode === 'rich' ? (
+      <Toolbar
+        editor={editor}
+        onOpen={openFile}
+        onToggleToc={() => setTocOpen((v) => !v)}
+        tocOpen={tocOpen}
+        onHelp={() => setHelpOpen(true)}
+        onToggleMode={toggleMode}
+        onClear={() => setClearOpen(true)}
+        mode={mode}
+      />
+    ) : (
+      <div className="flex shrink-0 items-center justify-end gap-0.5 border-b px-2 py-1">
+        <ToolbarButton
+          icon={<FileUp className="size-4" />}
+          label="Open a Markdown file"
+          onClick={openFile}
+        />
+        <ToolbarButton
+          icon={<CircleHelp className="size-4" />}
+          label="Help and about"
+          onClick={() => setHelpOpen(true)}
+        />
+        <ToolbarButton
+          icon={<PenLine className="size-4" />}
+          label="Edit as rich text"
+          onClick={toggleMode}
+        />
+        <ToolbarButton
+          icon={<Trash2 className="size-4" />}
+          label="Clear the document"
+          onClick={() => setClearOpen(true)}
+        />
+      </div>
+    )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -306,29 +199,7 @@ export function MarkdownEditor({
         }}
       />
 
-      <input
-        ref={imageInput}
-        type="file"
-        accept={IMAGE_ACCEPT}
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          const files = Array.from(e.target.files ?? [])
-          // Reset first: picking the same file twice in a row fires no change
-          // event otherwise, and re-adding a figure you just removed is a
-          // perfectly ordinary thing to do.
-          e.target.value = ''
-          if (files.length > 0) void addImages(files)
-        }}
-      />
       <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
-
-      <LinkDialog
-        editor={editor}
-        open={link.open}
-        initialHref={link.href}
-        onOpenChange={(open) => setLink((l) => ({ ...l, open }))}
-      />
 
       <Dialog open={clearOpen} onOpenChange={setClearOpen}>
         <DialogContent>
@@ -350,93 +221,17 @@ export function MarkdownEditor({
         </DialogContent>
       </Dialog>
 
-      {/** biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop is an
-       * enhancement over the Open button, which is fully keyboard accessible. */}
-      <div
-        className={cn(
-          'relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border transition-colors',
-          dragging && 'border-primary border-dashed bg-primary/5',
-        )}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragging(true)
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault()
-          setDragging(false)
-          // An image joins the document; anything else is opened AS the
-          // document. Dropping a photo used to replace the manuscript with its
-          // bytes, which is never what the gesture means.
-          const images = imageFilesFrom(e.dataTransfer.files)
-          if (images.length > 0 && editor) {
-            void addImages(images)
-            return
-          }
-          const file = e.dataTransfer.files[0]
-          if (file) void readFile(file)
-        }}
-      >
-        {mode === 'rich' ? (
-          <>
-            <Toolbar
-              editor={editor}
-              onOpen={openFile}
-              onToggleToc={() => setTocOpen((v) => !v)}
-              tocOpen={tocOpen}
-              onHelp={() => setHelpOpen(true)}
-              onToggleMode={toggleMode}
-              onClear={() => setClearOpen(true)}
-              mode={mode}
-            />
-            <div className="min-h-0 flex-1 overflow-auto">
-              <EditorContent editor={editor} className="h-full" />
-            </div>
-            {/* Positions itself; it must not be wrapped in another positioned
-                element or the two fight over placement. */}
-            {editor && (
-              <EditorToc
-                editor={editor}
-                open={tocOpen}
-                onClose={() => setTocOpen(false)}
-              />
-            )}
-            <EditorStatusBar editor={editor} />
-          </>
-        ) : (
-          <>
-            <div className="flex shrink-0 items-center justify-end gap-0.5 border-b px-2 py-1">
-              <ToolbarButton
-                icon={<FileUp className="size-4" />}
-                label="Open a Markdown file"
-                onClick={openFile}
-              />
-              <ToolbarButton
-                icon={<CircleHelp className="size-4" />}
-                label="Help and about"
-                onClick={() => setHelpOpen(true)}
-              />
-              <ToolbarButton
-                icon={<PenLine className="size-4" />}
-                label="Edit as rich text"
-                onClick={toggleMode}
-              />
-              <ToolbarButton
-                icon={<Trash2 className="size-4" />}
-                label="Clear the document"
-                onClick={() => setClearOpen(true)}
-              />
-            </div>
-            <Textarea
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
-              spellCheck={false}
-              className="min-h-0 flex-1 resize-none rounded-none border-0 font-mono text-sm leading-relaxed"
-              aria-label="Markdown source"
-            />
-          </>
-        )}
-      </div>
+      <EditorPane
+        value={value}
+        onChange={onChange}
+        mode={mode}
+        toolbar={chrome}
+        onEditor={setEditor}
+        onImages={addImages}
+        onFileDropped={(file) => void readFile(file)}
+        tocOpen={tocOpen}
+        onTocOpenChange={setTocOpen}
+      />
 
       {fileError && <p className="shrink-0 text-destructive text-xs">{fileError}</p>}
     </div>
