@@ -126,7 +126,7 @@ export function convertProject(
   // Every definition in the book, made visible to every part before parsing —
   // see `sharedDefinitions`'s doc comment for why a reference resolves only
   // against a definition in the SAME parsed source.
-  const shared = sharedDefinitions(parts.map((part) => part.source))
+  const shared = sharedDefinitions(parts)
 
   // Placed at the TOP of the body, not appended. A markdown definition is
   // document-scoped wherever it sits, and it serialises to nothing — but an
@@ -135,9 +135,9 @@ export function convertProject(
   // `[ref]: https://example.com` verbatim inside the reader's code block.
   // Nothing earlier in the file can swallow a definition placed first.
   const withDefinitions = (source: string): string => {
-    if (shared === '') return source
+    if (shared.block === '') return source
     const { frontmatter, body } = splitFrontmatter(source)
-    return joinFrontmatter(frontmatter, `${shared}\n\n${body}`)
+    return joinFrontmatter(frontmatter, `${shared.block}\n\n${body}`)
   }
 
   const result = serializeParts(
@@ -154,7 +154,9 @@ export function convertProject(
   )
   return {
     tex: assemble(config, result),
-    diagnostics: result.diagnostics,
+    // The book-wide ones first: a clash between two chapters is a property of
+    // the book, not of whichever chapter happens to be serialised second.
+    diagnostics: [...shared.diagnostics, ...result.diagnostics],
     images: result.images,
   }
 }

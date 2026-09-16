@@ -51,10 +51,45 @@ export function figureName(relativePath: string): string {
   return `${stem}-${fingerprint(relativePath)}${extension}`
 }
 
-/** Drop `./` segments, resolve `../`, and strip a leading slash. */
-function normalise(path: string): string {
+/**
+ * Percent-decode one path segment, or leave it exactly as it was.
+ *
+ * `decodeURIComponent` THROWS on a malformed escape — `%zz`, a lone `%`, a
+ * truncated pair — and `src/core` never throws: one hand-typed reference must
+ * not take down the conversion of a whole book. An undecodable segment is
+ * simply not decoded, which leaves it matching whatever it matched before.
+ *
+ * Per SEGMENT, never across the whole path. `%2F` is a literal slash inside a
+ * filename; decoding the path in one go would promote it to a directory
+ * separator and resolve to a file the author never wrote.
+ */
+function decodeSegment(segment: string): string {
+  if (!segment.includes('%')) return segment
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
+/**
+ * Drop `./` segments, resolve `../`, strip a leading slash, and — when asked —
+ * percent-decode each segment.
+ *
+ * Decoding is what makes `![](figures/my%20file.png)` find `my file.png`, and
+ * that is what Obsidian writes into a Markdown-style link when wikilinks are
+ * off, so without it a figure that displays perfectly in the author's vault
+ * silently failed here.
+ *
+ * It is optional because a file may legitimately have a `%` in its name. The
+ * resolver tries the literal path first and the decoded one second, so
+ * `a%2Fb.png` finds a file actually called that if one exists, and otherwise
+ * falls through to meaning `a/b.png`.
+ */
+function normalise(path: string, decode: boolean): string {
   const out: string[] = []
-  for (const segment of path.replace(/^\/+/, '').split('/')) {
+  for (const raw of path.replace(/^\/+/, '').split('/')) {
+    const segment = decode ? decodeSegment(raw) : raw
     if (segment === '' || segment === '.') continue
     if (segment === '..') out.pop()
     else out.push(segment)
@@ -85,9 +120,14 @@ function basenameOf(path: string): string {
  */
 export function buildFigureResolver(figurePaths: readonly string[]): FigureResolver {
   const exact = new Set(figurePaths)
+  // Keyed by LOWER-CASED name. Obsidian resolves an embed by name without
+  // regard to case, so `![[Diagram.png]]` finds `diagram.png` there and used
+  // to miss it here. Only this fallback folds case: an exact path below is a
+  // real filesystem entry, and folding that would let a reference resolve to a
+  // different file on a case-sensitive disk.
   const byName = new Map<string, string[]>()
   for (const path of figurePaths) {
-    const name = basenameOf(path)
+    const name = basenameOf(path).toLowerCase()
     const bucket = byName.get(name)
     if (bucket) bucket.push(path)
     else byName.set(name, [path])
@@ -100,14 +140,34 @@ export function buildFigureResolver(figurePaths: readonly string[]): FigureResol
   }
 
   return (reference, fromPart) => {
-    const wanted = normalise(reference)
-    if (wanted === '') return null
-
     const directory = directoryOf(fromPart)
-    const relative = directory === '' ? wanted : normalise(`${directory}/${wanted}`)
-    if (exact.has(relative)) return relative
-    if (exact.has(wanted)) return wanted
 
-    return byName.get(basenameOf(wanted))?.[0] ?? null
+    // The literal reading first, the percent-decoded one second. A file whose
+    // name really does contain a `%` therefore wins over the path its escape
+    // would spell out, and everything else still decodes.
+    const literal = normalise(reference, false)
+    const decoded = normalise(reference, true)
+    const readings = decoded === literal ? [literal] : [literal, decoded]
+
+    for (const wanted of readings) {
+      if (wanted === '') continue
+      const relative =
+        directory === '' ? wanted : normalise(`${directory}/${wanted}`, false)
+      if (exact.has(relative)) return relative
+      if (exact.has(wanted)) return wanted
+    }
+
+    for (const wanted of readings) {
+      if (wanted === '') continue
+      const bucket = byName.get(basenameOf(wanted).toLowerCase())
+      if (!bucket) continue
+      // An exactly-cased name beats a merely case-insensitive one, however
+      // deep it sits: `![[Diagram.png]]` meaning the file actually called
+      // `Diagram.png` is a better guess than a shallower `diagram.png`.
+      const name = basenameOf(wanted)
+      return bucket.find((path) => basenameOf(path) === name) ?? bucket[0]
+    }
+
+    return null
   }
 }

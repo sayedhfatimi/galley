@@ -4,6 +4,7 @@ import {
   type GalleyStore,
   MAX_PERSISTED_SOURCE,
   mergePersisted,
+  type ProjectSession,
   persistedSlice,
   safeStorage,
   useStore,
@@ -35,6 +36,17 @@ const state = (over: Partial<GalleyStore> = {}): GalleyStore =>
     applyFrontmatter: () => {},
     setResultOpen: () => {},
     toggleTheme: () => {},
+    rememberedProject: null,
+    mode: 'document',
+    session: null,
+    openProject: () => {},
+    closeProject: () => {},
+    forgetRememberedProject: () => {},
+    setProjectConfig: () => {},
+    setPane: () => {},
+    setLastFocused: () => {},
+    setFileState: () => {},
+    setProject: () => {},
     ...over,
   }) as GalleyStore
 
@@ -54,13 +66,36 @@ describe('persistedSlice', () => {
     expect(slice).not.toHaveProperty('prefilled')
   })
 
-  it('persists exactly the four keys it means to, so new state is opt-in', () => {
+  it('persists exactly the keys it means to, so new state is opt-in', () => {
     expect(Object.keys(persistedSlice(state())).sort()).toEqual([
       'config',
       'fileName',
+      'rememberedProject',
       'source',
       'theme',
     ])
+  })
+
+  /**
+   * A whole project must never reach localStorage.
+   *
+   * The session holds a directory handle, a handle per file and every
+   * chapter's full text. The handle alone settles it — `JSON.stringify` turns
+   * one into `{}`, so it would appear to persist and come back useless — and
+   * the sources would blow the quota on a book. The NAME is all that is kept,
+   * which is all the reopen prompt needs.
+   */
+  it('never persists the open session, only the folder name', () => {
+    const slice = persistedSlice(
+      state({
+        mode: 'project',
+        rememberedProject: { name: 'the-illusion' },
+        session: { name: 'the-illusion' } as never,
+      }),
+    )
+    expect(slice).not.toHaveProperty('session')
+    expect(slice).not.toHaveProperty('mode')
+    expect(slice.rememberedProject).toEqual({ name: 'the-illusion' })
   })
 
   // galley accepts documents up to 2 MB; localStorage is around 5 MB total.
@@ -221,5 +256,148 @@ describe('mergePersisted', () => {
     expect(merged.config.sections).toEqual({ numbered: true })
     // The reader's own choices still survive the backfill.
     expect(merged.config.fontSize).toBe(12)
+  })
+})
+
+/**
+ * A project is a MODE over the same shell, and the single document has to
+ * come back exactly as it was left.
+ *
+ * This is the one the audit forced. `App.tsx` writes a document's own
+ * frontmatter into `config.metadata` on every change, and `config` is one
+ * persisted field — so a session sharing it would leave the BOOK's trim size
+ * and typeface behind as the document's, and "close returns you to your
+ * document" would quietly be false.
+ */
+/**
+ * Captured at import, BEFORE any test sets state. The initial value is the
+ * thing under test here, so a fixture that assigns `mode` itself would pass
+ * whatever the store actually starts as.
+ */
+const INITIAL_MODE = useStore.getState().mode
+
+describe('project mode', () => {
+  const session = (over: Partial<ProjectSession> = {}): ProjectSession => ({
+    handle: { kind: 'directory', name: 'the-illusion' } as never,
+    name: 'the-illusion',
+    project: {
+      parts: [],
+      notes: [],
+      figures: [],
+      metadata: {},
+      config: {},
+      diagnostics: [],
+    },
+    bookSource: null,
+    handles: new Map(),
+    config: { ...DEFAULT_CONFIG, character: 'book', typeface: 'pagella' },
+    files: new Map(),
+    panes: { left: null, right: null },
+    lastFocused: 'left',
+    ...over,
+  })
+
+  const fresh = () => {
+    useStore.setState({
+      source: '# Mine\n',
+      fileName: 'mine',
+      config: { ...DEFAULT_CONFIG, character: 'article' },
+      mode: 'document',
+      session: null,
+      rememberedProject: null,
+    })
+  }
+
+  it('starts in document mode', () => {
+    // Reopening needs a user gesture, so landing in project mode on load
+    // would land in a project galley is not allowed to read. A remembered
+    // folder is an OFFER, and `mode` is deliberately not persisted at all.
+    expect(INITIAL_MODE).toBe('document')
+    expect(useStore.getState().session).toBeDefined()
+  })
+
+  it('does not restore a mode from storage, only a folder name', () => {
+    const merged = mergePersisted(
+      { rememberedProject: { name: 'the-illusion' }, mode: 'project' },
+      state({ mode: 'document' }),
+    )
+    expect(merged.mode).toBe('document')
+    expect(merged.rememberedProject).toEqual({ name: 'the-illusion' })
+  })
+
+  it('leaves the document untouched while a project is open', () => {
+    fresh()
+    const before = useStore.getState()
+    const sourceBefore = before.source
+    const configBefore = JSON.stringify(before.config)
+
+    useStore.getState().openProject(session())
+    useStore.getState().setProjectConfig({ ...DEFAULT_CONFIG, character: 'report' })
+
+    expect(useStore.getState().source).toBe(sourceBefore)
+    expect(JSON.stringify(useStore.getState().config)).toBe(configBefore)
+  })
+
+  it('returns the document exactly as it was when the project closes', () => {
+    fresh()
+    const configBefore = JSON.stringify(useStore.getState().config)
+
+    useStore.getState().openProject(session())
+    useStore.getState().setProjectConfig({ ...DEFAULT_CONFIG, character: 'report' })
+    useStore.getState().closeProject()
+
+    expect(useStore.getState().mode).toBe('document')
+    expect(useStore.getState().session).toBeNull()
+    expect(JSON.stringify(useStore.getState().config)).toBe(configBefore)
+    expect(useStore.getState().source).toBe('# Mine\n')
+  })
+
+  it('remembers the folder name when a project opens', () => {
+    fresh()
+    useStore.getState().openProject(session())
+    expect(useStore.getState().rememberedProject).toEqual({ name: 'the-illusion' })
+  })
+
+  it('keeps remembering the folder after it is closed, so it can be offered again', () => {
+    fresh()
+    useStore.getState().openProject(session())
+    useStore.getState().closeProject()
+    expect(useStore.getState().rememberedProject).toEqual({ name: 'the-illusion' })
+  })
+
+  it('tracks per-file state without disturbing the others', () => {
+    fresh()
+    useStore.getState().openProject(session())
+    useStore.getState().setFileState('a.md', { dirty: true })
+    useStore.getState().setFileState('b.md', { lastModified: 42 })
+    useStore.getState().setFileState('a.md', { lastModified: 7 })
+
+    const files = useStore.getState().session?.files
+    expect(files?.get('a.md')).toEqual({ dirty: true, lastModified: 7, conflict: null })
+    expect(files?.get('b.md')).toEqual({ dirty: false, lastModified: 42, conflict: null })
+  })
+
+  /**
+   * zustand compares by reference. A map mutated in place is the same object,
+   * so nothing subscribed to it re-renders — the dirty marker and the
+   * conflict banner would both be correct in the store and invisible on the
+   * screen.
+   */
+  it('replaces the file map rather than mutating it, so subscribers re-render', () => {
+    fresh()
+    useStore.getState().openProject(session())
+    const before = useStore.getState().session?.files
+    useStore.getState().setFileState('a.md', { dirty: true })
+    expect(useStore.getState().session?.files).not.toBe(before)
+  })
+
+  it('ignores project actions when no project is open', () => {
+    fresh()
+    expect(() => {
+      useStore.getState().setPane('left', 'a.md')
+      useStore.getState().setFileState('a.md', { dirty: true })
+      useStore.getState().setLastFocused('right')
+    }).not.toThrow()
+    expect(useStore.getState().session).toBeNull()
   })
 })

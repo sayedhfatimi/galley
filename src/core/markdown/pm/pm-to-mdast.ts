@@ -73,6 +73,10 @@ function blockFromPm(node: PMNode): BlockContent | null {
       return tableFromPm(node)
     case 'mathBlock':
       return mathBlockFromPm(node)
+    case 'htmlBlock':
+      return htmlFromPm(node)
+    case 'linkDefinition':
+      return linkDefinitionFromPm(node)
     case 'image':
       return imageBlockFromPm(node)
     default:
@@ -88,6 +92,33 @@ function imageBlockFromPm(node: PMNode): BlockContent {
     type: 'paragraph',
     children: [imageFromPm(node)],
   } satisfies Paragraph
+}
+
+/** galley addition: a link definition, back where the author had it. */
+function linkDefinitionFromPm(node: PMNode): BlockContent {
+  const attr = (key: string): string | undefined =>
+    typeof node.attrs?.[key] === 'string' ? (node.attrs[key] as string) : undefined
+  const identifier = attr('identifier') ?? ''
+  return {
+    type: 'definition',
+    identifier,
+    label: attr('label') ?? identifier,
+    url: attr('url') ?? '',
+    title: attr('title') ?? null,
+  } as unknown as BlockContent
+}
+
+/**
+ * galley addition: raw HTML back out exactly as it came in.
+ *
+ * One function for both the block and the inline form, because mdast has one
+ * `html` node type for both and the only difference is where it sits.
+ */
+function htmlFromPm(node: PMNode): BlockContent {
+  return {
+    type: 'html',
+    value: typeof node.attrs?.value === 'string' ? node.attrs.value : '',
+  } as unknown as BlockContent
 }
 
 function mathBlockFromPm(node: PMNode): BlockContent {
@@ -128,10 +159,11 @@ function blockquoteFromPm(node: PMNode): Blockquote {
 function codeBlockFromPm(node: PMNode): Code {
   const text = (node.content ?? []).map((n) => n.text ?? '').join('')
   const lang = node.attrs?.language
+  const meta = node.attrs?.meta
   return {
     type: 'code',
     lang: typeof lang === 'string' && lang.length > 0 ? lang : null,
-    meta: null,
+    meta: typeof meta === 'string' && meta.length > 0 ? meta : null,
     value: text,
   }
 }
@@ -237,7 +269,7 @@ function phrasingFromPm(nodes: PMNode[]): PhrasingContent[] {
       out.push(wrapTextWithMarks(node.text ?? '', node.marks ?? []))
     } else if (node.type === 'hardBreak') {
       out.push({ type: 'break' })
-    } else if (node.type === 'image') {
+    } else if (node.type === 'image' || node.type === 'imageInline') {
       out.push(imageFromPm(node))
     } else if (node.type === 'mathInline') {
       const tex = (node.content ?? []).map((n) => n.text ?? '').join('')
@@ -245,6 +277,8 @@ function phrasingFromPm(nodes: PMNode[]): PhrasingContent[] {
         type: 'inlineMath',
         value: tex,
       } as unknown as PhrasingContent)
+    } else if (node.type === 'htmlInline') {
+      out.push(htmlFromPm(node) as unknown as PhrasingContent)
     } else if (node.type === 'footnote') {
       // galley addition: split back into an inline reference plus a root-level
       // definition, which is the only shape mdast allows.

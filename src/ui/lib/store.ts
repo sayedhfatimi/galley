@@ -1,8 +1,68 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { DEFAULT_CONFIG, type GalleyConfig, type Metadata } from '@/core/config'
+import { partOrder } from '@/core/project/order'
+import type { Project } from '@/core/project/types'
 
 export type Theme = 'light' | 'dark'
+
+/** Which surface the reader is on. A project is a mode, not a separate app. */
+export type Mode = 'document' | 'project'
+
+export type PaneSide = 'left' | 'right'
+
+/** What galley knows about one file in the open project. */
+export interface FileState {
+  /** Edited since it was last written. */
+  dirty: boolean
+  /** The `lastModified` galley last saw. Every write is checked against it. */
+  lastModified: number | null
+  /**
+   * Someone else changed the file. Autosave stops for this file until the
+   * reader decides, because the alternative is choosing for them.
+   */
+  conflict: { theirs: number } | null
+}
+
+/**
+ * The open folder, and everything derived from it.
+ *
+ * **It carries its own `GalleyConfig`, and that is load-bearing.** The
+ * document's config is one persisted field, and `App.tsx` writes a document's
+ * own frontmatter into `config.metadata` on every change. Sharing it would
+ * mean opening a book and closing it again left the BOOK's trim size,
+ * typeface and margins behind as the single document's — so "close returns
+ * you to the document exactly as you left it" would be false.
+ *
+ * None of this persists. A handle cannot survive `JSON.stringify`, the
+ * sources belong to the disk rather than to localStorage, and the whole point
+ * of the reopen prompt is that the browser requires a gesture before galley
+ * may read the folder again.
+ */
+export interface ProjectSession {
+  handle: FileSystemDirectoryHandle
+  name: string
+  project: Project
+  /**
+   * `book.md`'s own text, or null when the folder has none.
+   *
+   * Held here because `readProject` deliberately returns it as NEITHER a part
+   * nor a note — it is the book's settings, never a chapter of it — so it
+   * appears nowhere in `project`. Without it a settings change had no current
+   * source to write against and silently did nothing.
+   */
+  bookSource: string | null
+  handles: Map<string, FileSystemFileHandle>
+  config: GalleyConfig
+  files: Map<string, FileState>
+  panes: { left: string | null; right: string | null }
+  /**
+   * Which pane the toolbar acts on. Tracked because clicking a toolbar button
+   * takes focus OUT of the editor, so "whatever is focused now" is always the
+   * button. Getting this wrong formats the wrong file.
+   */
+  lastFocused: PaneSide
+}
 
 /**
  * Application state.
@@ -32,10 +92,22 @@ export interface GalleyStore {
   config: GalleyConfig
   theme: Theme
 
+  /**
+   * The folder last opened, by name only.
+   *
+   * Enough to offer "reopen the-illusion" and nothing more: the handle itself
+   * lives in IndexedDB (`projectStore.ts`), because localStorage is strings
+   * and a handle stringifies to `{}`.
+   */
+  rememberedProject: { name: string } | null
+
   // ---- transient: never persisted ----
   /** True when metadata was filled from the document's own frontmatter. */
   prefilled: boolean
   resultOpen: boolean
+  /** A project is a mode over the same shell; the document is always the default. */
+  mode: Mode
+  session: ProjectSession | null
 
   setSource: (source: string) => void
   setFileName: (fileName: string) => void
@@ -44,6 +116,33 @@ export interface GalleyStore {
   applyFrontmatter: (found: Metadata) => void
   setResultOpen: (open: boolean) => void
   toggleTheme: () => void
+
+  openProject: (session: ProjectSession) => void
+  closeProject: () => void
+  forgetRememberedProject: () => void
+  setProjectConfig: (config: GalleyConfig) => void
+  setPane: (side: PaneSide, path: string | null) => void
+  setLastFocused: (side: PaneSide) => void
+  setFileState: (path: string, patch: Partial<FileState>) => void
+  setProject: (project: Project) => void
+  setBookSource: (source: string) => void
+  /**
+   * Register a figure that was added after the project was opened.
+   *
+   * `project.figures` is a snapshot of one disk walk, and the resolver is
+   * built from it. Writing a picture into the folder without telling the
+   * session leaves the file genuinely on disk and genuinely referenced, and
+   * the very next render unable to resolve it — both halves correct and never
+   * introduced, which is this project's most expensive recurring shape.
+   */
+  addFigure: (path: string, handle: FileSystemFileHandle) => void
+}
+
+/** A file galley has not read yet is not clean, it is simply unknown. */
+export const UNKNOWN_FILE: FileState = {
+  dirty: false,
+  lastModified: null,
+  conflict: null,
 }
 
 const SAMPLE = `# A first heading
@@ -76,6 +175,10 @@ export function persistedSlice(state: GalleyStore) {
     fileName: state.fileName,
     config: state.config,
     theme: state.theme,
+    // The NAME only. The session holds a directory handle, file handles and
+    // every chapter's text; none of that belongs in localStorage, and the
+    // handle could not survive it anyway.
+    rememberedProject: state.rememberedProject,
   }
 }
 
@@ -166,6 +269,14 @@ export function mergePersisted(persisted: unknown, current: GalleyStore): Galley
     ...current,
     ...saved,
     config: { ...current.config, ...(saved.config ?? {}) },
+    // Forced, not merged. `persistedSlice` does not write either of these, but
+    // this merge spreads whatever it FINDS — a value left by an older build, or
+    // one somebody typed into devtools, would otherwise restore project mode
+    // with no session behind it and no permission to read the folder. A
+    // session cannot be resurrected from storage; it can only be reopened by a
+    // click.
+    mode: 'document',
+    session: null,
   }
 }
 
@@ -178,6 +289,12 @@ export const useStore = create<GalleyStore>()(
       config: DEFAULT_CONFIG,
       theme: initialTheme(),
       resultOpen: false,
+      rememberedProject: null,
+      // Always. A remembered folder is an OFFER to reopen — the browser will
+      // not grant permission without a user gesture, so landing in project
+      // mode on load would land in a project galley cannot read.
+      mode: 'document',
+      session: null,
 
       setSource: (source) => set({ source }),
       setFileName: (fileName) => set({ fileName }),
@@ -191,6 +308,65 @@ export const useStore = create<GalleyStore>()(
         })),
 
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+
+      openProject: (session) =>
+        set({
+          mode: 'project',
+          session,
+          rememberedProject: { name: session.name },
+        }),
+
+      // The document's own `source`, `config` and `fileName` are untouched
+      // throughout, which is what makes this a mode rather than a second app.
+      closeProject: () => set({ mode: 'document', session: null }),
+
+      forgetRememberedProject: () => set({ rememberedProject: null }),
+
+      setProjectConfig: (config) =>
+        set((s) => (s.session ? { session: { ...s.session, config } } : {})),
+
+      setPane: (side, path) =>
+        set((s) =>
+          s.session
+            ? { session: { ...s.session, panes: { ...s.session.panes, [side]: path } } }
+            : {},
+        ),
+
+      setLastFocused: (side) =>
+        set((s) => (s.session ? { session: { ...s.session, lastFocused: side } } : {})),
+
+      setFileState: (path, patch) =>
+        set((s) => {
+          if (!s.session) return {}
+          const files = new Map(s.session.files)
+          files.set(path, { ...(files.get(path) ?? UNKNOWN_FILE), ...patch })
+          return { session: { ...s.session, files } }
+        }),
+
+      setProject: (project) =>
+        set((s) => (s.session ? { session: { ...s.session, project } } : {})),
+
+      setBookSource: (bookSource) =>
+        set((s) => (s.session ? { session: { ...s.session, bookSource } } : {})),
+
+      addFigure: (path, handle) =>
+        set((s) => {
+          if (!s.session || s.session.project.figures.includes(path)) return {}
+          const handles = new Map(s.session.handles)
+          handles.set(path, handle)
+          return {
+            session: {
+              ...s.session,
+              handles,
+              project: {
+                ...s.session.project,
+                // Sorted the way `readProject` sorts them, so a figure added
+                // now sits where a figure found at open time would have.
+                figures: partOrder([...s.session.project.figures, path]),
+              },
+            },
+          }
+        }),
     }),
     {
       name: 'galley',

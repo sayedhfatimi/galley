@@ -1,4 +1,4 @@
-import { AlertTriangle, Download, Loader2 } from 'lucide-react'
+import { AlertTriangle, Download, FolderDown, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -27,9 +27,23 @@ import type { useCompile } from './lib/useCompile'
 export interface ResultDialogProps {
   compile: ReturnType<typeof useCompile>
   onDownloadTex: () => void
+  /**
+   * Writes the PDF into the open project folder. Absent for a single
+   * document, which has no folder to write into.
+   *
+   * Offered HERE rather than beside Render, because the reader is looking at
+   * the thing they would be saving — and it is on request precisely because
+   * every write into a synced folder is replicated.
+   */
+  onSaveToFolder?: () => Promise<boolean>
 }
 
-export function ResultDialog({ compile, onDownloadTex }: ResultDialogProps) {
+export function ResultDialog({
+  compile,
+  onDownloadTex,
+  onSaveToFolder,
+}: ResultDialogProps) {
+  const [saved, setSaved] = useState<'idle' | 'saving' | 'done' | 'failed'>('idle')
   const fileName = useStore((s) => s.fileName)
   const open = useStore((s) => s.resultOpen)
   const onOpenChange = useStore((s) => s.setResultOpen)
@@ -148,6 +162,24 @@ export function ResultDialog({ compile, onDownloadTex }: ResultDialogProps) {
                 <Download className="size-3.5" />
                 Download the source
               </Button>
+              {onSaveToFolder && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={saved === 'saving'}
+                  onClick={async () => {
+                    setSaved('saving')
+                    setSaved((await onSaveToFolder()) ? 'done' : 'failed')
+                  }}
+                >
+                  <FolderDown className="size-3.5" />
+                  {saved === 'done'
+                    ? 'Saved as book.pdf'
+                    : saved === 'failed'
+                      ? 'Could not save it'
+                      : 'Save into the folder'}
+                </Button>
+              )}
             </div>
           </>
         )}

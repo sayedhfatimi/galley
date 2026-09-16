@@ -3,12 +3,19 @@ import { convert, readFrontmatter } from '@/core/latex/document'
 import { createZip } from '@/core/zip'
 import { ActionBar } from '@/ui/ActionBar'
 import { Diagnostics } from '@/ui/Diagnostics'
+import { ErrorBoundary } from '@/ui/ErrorBoundary'
+import { HelpDialog } from '@/ui/editor/HelpDialog'
 import { MarkdownEditor } from '@/ui/editor/MarkdownEditor'
 import { listImageNames, loadImages } from '@/ui/lib/imageStore'
 import { useStore } from '@/ui/lib/store'
 import { useCompile } from '@/ui/lib/useCompile'
 import { ParticleBackground } from '@/ui/ParticleBackground'
 import { PrivacyNotice } from '@/ui/PrivacyNotice'
+import { MobileGate } from '@/ui/project/MobileGate'
+import { OpenProject } from '@/ui/project/OpenProject'
+import { type ProjectOutput, ProjectShell } from '@/ui/project/ProjectShell'
+import { useProjectOpening } from '@/ui/project/useProjectOpening'
+import { writePdf } from '@/ui/project/writeFigure'
 import { ResultDialog } from '@/ui/ResultDialog'
 
 /**
@@ -28,21 +35,59 @@ export default function App() {
   const setFileName = useStore((s) => s.setFileName)
   const applyFrontmatter = useStore((s) => s.applyFrontmatter)
   const setResultOpen = useStore((s) => s.setResultOpen)
+  const mode = useStore((s) => s.mode)
+  const closeProject = useStore((s) => s.closeProject)
+  const opening = useProjectOpening()
+  const session = useStore((s) => s.session)
+  // The project's conversion, lifted so the ActionBar can render and download
+  // it exactly as it does a single document's — including its FIGURES, which
+  // live in the folder rather than in this browser's image store.
+  const [projectOutput, setProjectOutput] = useState<ProjectOutput | null>(null)
+  // Whether the "open a book" screen is showing. A screen rather than jumping
+  // straight to the OS picker, because a remembered folder has to be OFFERED
+  // — permission needs a gesture — and a browser that cannot do this at all
+  // needs somewhere to say so.
+  const [openingProject, setOpeningProject] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const inProject = mode === 'project'
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
 
+  /**
+   * Help, bound once at the root.
+   *
+   * Registered here rather than in an editor because a folder project mounts
+   * TWO of them, and two registrations of a TOGGLE cancel each other — the
+   * shortcut would read as broken rather than doubled. It also has to work in
+   * both modes, and only the root spans both.
+   */
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== '/' || !(event.metaKey || event.ctrlKey)) return
+      event.preventDefault()
+      setHelpOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Frontmatter fills only the fields the reader has not set themselves, so
   // their own edits survive the next keystroke in the document.
+  //
+  // Gated on document mode. A project's metadata comes from `book.md` into
+  // the SESSION's config; letting this run would write the single document's
+  // title and author over the book's, and `config` is one persisted field.
   const lastFrontmatter = useRef('')
   useEffect(() => {
+    if (inProject) return
     const found = readFrontmatter(source)
     const key = JSON.stringify(found)
     if (key === lastFrontmatter.current) return
     lastFrontmatter.current = key
     if (Object.keys(found).length > 0) applyFrontmatter(found)
-  }, [source, applyFrontmatter])
+  }, [source, applyFrontmatter, inProject])
 
   /**
    * The images this browser actually holds bytes for.
@@ -59,9 +104,23 @@ export default function App() {
   }, [])
   useEffect(refreshAttached, [refreshAttached])
 
-  const { tex, diagnostics, images } = useMemo(
+  const single = useMemo(
     () => convert(source, config, attached ? new Set(attached) : undefined),
     [source, config, attached],
+  )
+  // In project mode the conversion belongs to the shell — it needs the
+  // project's own config and its figure resolver, neither of which exists
+  // here — so the ActionBar reads whichever `.tex` the current mode produced.
+  const tex = inProject ? (projectOutput?.tex ?? '') : single.tex
+  const { diagnostics } = single
+  const images = inProject ? (projectOutput?.images ?? []) : single.images
+  // Whichever mode is active, this is how its figures are fetched.
+  const loadFigures = useCallback(
+    () =>
+      inProject
+        ? (projectOutput?.loadImages() ?? Promise.resolve([]))
+        : loadImages(images),
+    [inProject, projectOutput, images],
   )
   const compile = useCompile()
 
@@ -83,7 +142,7 @@ export default function App() {
    * `.tex`, because a zip containing a single file is a worse thing to receive.
    */
   const downloadTex = async () => {
-    const attached = await loadImages(images)
+    const attached = await loadFigures()
     if (attached.length === 0) {
       save(new Blob([tex], { type: 'application/x-tex' }), 'tex')
       return
@@ -108,11 +167,11 @@ export default function App() {
     // Only what this document actually draws. A reader who has attached twenty
     // figures over a week should not push all twenty through the engine to
     // render the one page that uses two.
-    compile.compile(tex, await loadImages(images))
+    compile.compile(tex, await loadFigures())
   }
 
   return (
-    <>
+    <MobileGate>
       <ParticleBackground theme={theme} />
 
       <div className="relative z-10 flex h-screen flex-col overflow-hidden">
@@ -122,18 +181,55 @@ export default function App() {
           busy={compile.state === 'running'}
           onRender={render}
           onDownloadTex={downloadTex}
+          projectName={inProject ? (opening.remembered?.name ?? 'project') : null}
+          canOpenProject={opening.supported}
+          onOpenProject={() => setOpeningProject(true)}
+          onCloseProject={async () => {
+            // Anything still in the debounce is written BEFORE the shell
+            // unmounts, because unmounting clears those timers and the edit
+            // would go with them.
+            await projectOutput?.flushEdits()
+            closeProject()
+            setOpeningProject(false)
+          }}
+          projectConfig={inProject ? projectOutput?.config : undefined}
+          onProjectConfigChange={inProject ? projectOutput?.setConfig : undefined}
+          onHelp={() => setHelpOpen(true)}
         />
 
-        <main className="flex min-h-0 flex-1 flex-col px-4 py-4">
-          <MarkdownEditor
-            value={source}
-            onChange={setSource}
-            onFileName={(name) => setFileName(name.replace(/\.[^.]+$/, ''))}
-            onImagesChanged={refreshAttached}
+        {inProject ? (
+          // Scoped to the project surface: a throw here would otherwise
+          // unmount the root with unsaved text in an editor.
+          <ErrorBoundary
+            onRecover={closeProject}
+            recoverLabel="Close the project"
+            rescue={() => projectOutput?.tex || null}
+          >
+            <ProjectShell onOutput={setProjectOutput} />
+          </ErrorBoundary>
+        ) : openingProject ? (
+          <OpenProject
+            supported={opening.supported}
+            remembered={opening.remembered}
+            busy={opening.busy}
+            error={opening.error}
+            onPick={() => void opening.pick()}
+            onReopen={() => void opening.reopen()}
+            onForget={() => void opening.forget()}
+            onCancel={() => setOpeningProject(false)}
           />
-        </main>
+        ) : (
+          <main className="flex min-h-0 flex-1 flex-col px-4 py-4">
+            <MarkdownEditor
+              value={source}
+              onChange={setSource}
+              onFileName={(name) => setFileName(name.replace(/\.[^.]+$/, ''))}
+              onImagesChanged={refreshAttached}
+            />
+          </main>
+        )}
 
-        {diagnostics.length > 0 && (
+        {!inProject && diagnostics.length > 0 && (
           <div className="max-h-32 shrink-0 overflow-auto border-t px-4 py-2">
             <Diagnostics items={diagnostics} />
           </div>
@@ -142,7 +238,22 @@ export default function App() {
         <PrivacyNotice />
       </div>
 
-      <ResultDialog compile={compile} onDownloadTex={downloadTex} />
-    </>
+      <HelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+
+      <ResultDialog
+        compile={compile}
+        onDownloadTex={downloadTex}
+        onSaveToFolder={
+          inProject && session
+            ? async () => {
+                const bytes = compile.pdfUrl
+                  ? await (await fetch(compile.pdfUrl)).arrayBuffer()
+                  : null
+                return bytes ? writePdf(session.handle, 'book.pdf', bytes) : false
+              }
+            : undefined
+        }
+      />
+    </MobileGate>
   )
 }

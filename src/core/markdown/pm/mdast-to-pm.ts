@@ -8,7 +8,9 @@ import type {
   FootnoteDefinition,
   FootnoteReference,
   Heading,
+  Html,
   Image,
+  ImageReference,
   InlineCode,
   Link,
   LinkReference,
@@ -108,6 +110,36 @@ function blockToPm(node: RootContent): PMNode | null {
         ? { type: 'mathBlock', content: [{ type: 'text', text: tex }] }
         : { type: 'mathBlock' }
     }
+    // galley addition: a link definition is kept where the author put it.
+    //
+    // It is also resolved into `linkDefs` above, and a `[text][ref]` using it
+    // still normalises to inline form — that is accepted churn, and rich mode
+    // warns about it. What is NOT acceptable is what happened before: the
+    // definition itself hit `default: return null`, so a note holding nothing
+    // but a list of link definitions round-tripped to an EMPTY FILE, and a
+    // chapter's definitions vanished from under the cross-chapter links that
+    // `project/definitions.ts` exists to serve.
+    case 'definition': {
+      const def = node as Definition
+      return {
+        type: 'linkDefinition',
+        attrs: {
+          identifier: def.identifier,
+          label: def.label ?? def.identifier,
+          url: def.url,
+          title: def.title ?? null,
+        },
+      }
+    }
+    // galley addition: raw HTML is carried, never dropped.
+    //
+    // `serialize.ts` already passes HTML through to the LaTeX as literal text
+    // with a `raw-html` diagnostic, so nothing here changes what is typeset.
+    // What it changes is the author's FILE: without a node to hold it, a
+    // `<div>` round-tripped to nothing at all and one keystroke deleted it
+    // from their vault.
+    case 'html':
+      return { type: 'htmlBlock', attrs: { value: (node as Html).value } }
     // Lone-image paragraphs in markdown surface here as a top-level
     // image MDAST node; emit as a block-level PM image node directly
     // (renderers commonly re-promote lone-image paragraphs
@@ -150,7 +182,10 @@ function blockquoteToPm(node: Blockquote): PMNode {
 function codeBlockToPm(node: Code): PMNode {
   return {
     type: 'codeBlock',
-    attrs: { language: node.lang ?? null },
+    // `meta` is whatever follows the language on the fence — `title=x`, a
+    // line range, a plugin's directive. galley does nothing with it, which is
+    // not a reason to strip it out of the author's file.
+    attrs: { language: node.lang ?? null, meta: node.meta ?? null },
     ...(node.value ? { content: [{ type: 'text', text: node.value }] } : {}),
   }
 }
@@ -277,13 +312,25 @@ function phrasingNodeToPm(node: PhrasingContent, marks: PMMark[]): PMNode[] | nu
       return linkToPm(node as Link, marks)
     case 'break':
       return [hardBreakToPm(node as Break)]
-    // Inline images inside a paragraph with other content are dropped
-    // — image is a block-level node in our PM schema, so it can't
-    // live inside a paragraph. Rare markdown form; the common case
-    // (lone-image paragraph) is promoted to a top-level block image
-    // in `blockToPm`.
-    case 'image':
-      return null
+    // galley addition: an inline image gets an inline node.
+    //
+    // The block `image` node cannot live inside a paragraph, so this case
+    // used to return null and `Text ![](fig.png) more` came back as
+    // `Text  more` — the picture deleted from the author's own file. A
+    // lone-image paragraph is still promoted to the block form in
+    // `blockToPm`; this is for the one that shares a line with prose.
+    case 'image': {
+      const image = node as Image
+      const attrs: Record<string, unknown> = { src: image.url }
+      if (image.alt) attrs.alt = image.alt
+      if (image.title) attrs.title = image.title
+      return [{ type: 'imageInline', attrs, marks }]
+    }
+    // galley addition: inline raw HTML, for the same reason as the block form
+    // above. `Text <br> more` losing its `<br>` is the author's line break
+    // gone from their own file.
+    case 'html':
+      return [{ type: 'htmlInline', attrs: { value: (node as Html).value }, marks }]
     case 'inlineMath': {
       const tex = (node as { value?: string }).value ?? ''
       return [
@@ -305,6 +352,19 @@ function phrasingNodeToPm(node: PhrasingContent, marks: PMMark[]): PMNode[] | nu
           ...(inner.length > 0 ? { content: inner } : {}),
         },
       ]
+    }
+    // galley addition: a reference-style IMAGE is resolved the same way a
+    // reference link is. Without this it fell to `default: return null` and
+    // `![alt][ref]` disappeared from the author's file outright — not even
+    // the alt text survived. `latex/serialize.ts` has always handled it, so
+    // the picture reached the PDF while the editor deleted it.
+    case 'imageReference': {
+      const ref = node as unknown as ImageReference
+      const def = linkDefs.get(ref.identifier)
+      const attrs: Record<string, unknown> = { src: def?.url ?? ref.identifier }
+      if (ref.alt) attrs.alt = ref.alt
+      if (def?.title) attrs.title = def.title
+      return [{ type: 'imageInline', attrs, marks }]
     }
     // galley addition: reference links are RESOLVED here rather than modelled.
     // galley's serializer resolves them the same way, so the LaTeX is identical

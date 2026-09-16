@@ -8,10 +8,11 @@
   Markdown in, a typeset PDF <strong>and</strong> the LaTeX that made it out.
 </p>
 
-Paste a manuscript, choose what you are making, and get a properly typeset PDF — set by a
-real TeX engine running **entirely inside your browser tab**. No account, no upload, no
-server. You also get the `.tex` source, and it is not a souvenir: it is an ordinary LaTeX
-document you can compile yourself, hand to a typesetter, or edit for the rest of its life.
+Paste a manuscript — or point galley at a **folder of chapters** — and get a properly
+typeset PDF, set by a real TeX engine running **entirely inside your browser tab**. No
+account, no upload, no server. You also get the `.tex` source, and it is not a souvenir:
+it is an ordinary LaTeX document you can compile yourself, hand to a typesetter, or edit
+for the rest of its life.
 
 Most Markdown-to-PDF tools render your document as a web page and print it. galley does
 not. It walks the Markdown structure directly into LaTeX, so what comes out reads like a
@@ -38,6 +39,11 @@ Your work is saved in your browser's local storage so that closing the tab and c
 does not lose it. That copy is on your machine and only your machine. **Clear the document**
 in the toolbar removes it.
 
+If you open a **folder**, galley reads and writes those files directly through the
+browser's own file-access permission, which you grant per folder and which the browser
+asks for again after a restart. Those files never move either — there is still nowhere for
+them to go.
+
 Two consequences worth knowing. The first render downloads the engine and the TeX Live
 files your document needs. That is about 26 MB of engine and format before anything else,
 plus whatever fonts and packages your document actually touches: measured, a plain article
@@ -45,6 +51,17 @@ comes to roughly 35 MB and a book with maths, tables and a non-default typeface 
 38 MB. Only the typeface you choose is fetched, so the others cost you nothing. It happens
 once and is then cached; later renders fetch nothing. And everything is bounded by your own
 CPU rather than by a queue, with a 60-second ceiling on any single compile.
+
+## Two ways to use it
+
+**One document.** Paste, type, or drop in a Markdown file. Everything stays in this
+browser, and it works in any browser.
+
+**A folder of chapters.** **Open a book** points galley at a folder — an Obsidian vault,
+or one folder inside one — and reads, edits and typesets the files in place. A book is
+usually many files, and this is the workflow galley is really for. See
+[Writing a book from a folder](#writing-a-book-from-a-folder). Needs Chrome or Edge on the
+desktop.
 
 ## Quick start
 
@@ -132,6 +149,11 @@ structure is completely unchanged.
 **Front and back matter exist only in a Book.** Ask for them in an Article or Report and
 galley says so rather than silently ignoring it.
 
+This is the **single-document** form, keyed by heading text. In a folder project each
+chapter is a file and carries its own `galley:` block instead, which is why renaming a
+heading cannot lose its setting there — see
+[Writing a book from a folder](#writing-a-book-from-a-folder).
+
 **The Structure section of the Configure dialog writes this block for you** for the
 headings it can see, so nobody has to type YAML for the ordinary case. It lists the
 document's own headings, so the two cannot drift apart — but renaming a heading leaves its
@@ -148,6 +170,156 @@ allow it — so make it unnumbered instead if that is what you want.
 
 If galley cannot parse your frontmatter at all, the Structure section says so and offers no
 controls, rather than controls that would quietly do nothing.
+
+## Writing a book from a folder
+
+A book is usually a folder of chapters rather than one enormous file, and that is how
+most people draft one — a file per chapter, figures beside them, notes in among it all.
+**Open a book** points galley at that folder and works on it in place, so a draft is
+continued rather than pasted in again every time you want to see it typeset.
+
+Nothing about this changes where your work lives. galley reads and writes the files on
+your machine, through the browser's own file-access permission, and still has no server
+to send anything to.
+
+### Browser support, plainly
+
+Reading and writing a folder needs the **File System Access API**, which today means
+**Chrome or Edge on the desktop**. Firefox has declined to implement it and Safari has not
+shipped it. galley detects this and says so rather than offering a button that fails —
+single documents work everywhere.
+
+On a phone, write in **Obsidian** and open the same folder here when you are back at a
+desktop. It is a better mobile editor than this could be, and the folder is the same
+folder.
+
+### What makes a file a chapter
+
+A `galley:` block in its frontmatter. Without one the file is a **note** — still listed,
+still editable, simply never typeset.
+
+```yaml
+---
+galley:
+  role: front        # front | main | back
+  listed: false      # keep it out of the contents
+  toc_title: Short   # a shorter entry than the heading
+---
+
+# Copyright
+```
+
+**You do not have to write that block.** Select a file in the sidebar and choose *Front
+matter*, *Chapter* or *Back matter* underneath it; galley writes the frontmatter for you,
+leaving every other key, its order and its comments alone. *Not in the book* turns it back
+into a note — the file stays exactly where it is and keeps its text, so nothing is ever
+lost by moving something out of the book.
+
+This is why notes are first-class rather than an ignore rule. Research, outlines and
+half-finished ideas live beside the draft, open next to the chapter they belong to, and
+cannot be silently dropped from the book — a file that is not in the book is still on the
+list.
+
+### The order is the file names
+
+Chapters are ordered by their path, sorted the way a person would sort it, so `9` comes
+before `10`. Nothing records the order a second time, which means **renaming a file is how
+you move a chapter**. Front matter comes first, then chapters, then back matter, whatever
+the names.
+
+### `book.md` carries the book
+
+Title and author go in the ordinary frontmatter; the document settings go under a `book:`
+key.
+
+```yaml
+---
+title: The Philosophy of Illusions
+author: A Writer
+book:
+  character: book
+  paper: a5
+  two_sided: true
+  toc:
+    include: true
+    depth: 1
+---
+```
+
+**Configure** writes this for you, and it is what makes the folder portable: the settings
+travel with the book rather than living in one browser. Note the two keys ask different
+questions — `galley:` in any file means *this file is in the book*; `book:` in `book.md`
+means *the book's own settings*.
+
+### Any layout works
+
+galley imposes no folder convention, so it cannot conflict with one you already have.
+Chapters at the top level, or a folder each with their figures beside them; notes
+anywhere. Dot-folders such as `.obsidian` are never read — not filtered out afterwards,
+never opened at all.
+
+```
+the-illusion/
+  book.md               the book's title, author and settings
+  00-copyright.md       front matter, kept out of the contents
+  01-dedication.md      front matter
+  03-illusion/
+    index.md            a chapter — named after its folder in the sidebar
+    diagram.png         its figure, beside it
+  99-about.md           back matter
+  research.md           a note — listed, editable, never typeset
+  ideas/
+    endings.md          another note
+```
+
+### Saving, and refusing to overwrite
+
+Edits save themselves a moment after you stop typing. Before **every** write galley
+re-reads the file, and if it changed somewhere else — in Obsidian, or on your phone
+through Sync — it **refuses and tells you** rather than choosing which version to lose.
+Load the newer one and carry on. Files are re-checked when you come back to the tab and
+when you switch between them, so a change that arrived while you were elsewhere is noticed
+before you type over it.
+
+### A project opens in Markdown, deliberately
+
+These are your files, so galley does not reformat them. The **source view** writes back
+exactly the bytes you typed.
+
+The rich editor is one click away and tidies formatting as it goes: `_em_` becomes `*em*`,
+`* bullets` become `- bullets`, an underlined heading becomes `#`. None of that changes
+your words or the PDF, but it does change the file — so galley says so before your first
+edit in it rather than after. Obsidian callouts, tags, highlights, wikilinks, embeds and
+raw HTML all survive either way.
+
+### Figures in a folder
+
+**Add a figure** lists the pictures already in the folder and inserts a reference relative
+to the chapter you are in. Dropping or pasting one writes it beside that chapter; if the
+name is already taken galley asks you for a different one rather than replacing anything —
+a replaced picture has no undo.
+
+Obsidian's `![[diagram.png]]` embeds work, as do ordinary `![](path.png)` links, including
+the percent-encoded form Obsidian writes when wikilinks are off. A reference that matches
+nothing in the folder is **reported**, not quietly dropped, because a figure that resolves
+in Obsidian and vanishes here is the exact problem this is meant to remove.
+
+Resolution is scoped to the project folder, not the whole vault. In a vault holding several
+books that is deliberately *narrower* than Obsidian — a bare `diagram.png` cannot resolve
+to a different book's figure.
+
+### Getting the book out
+
+**Render PDF** typesets every chapter in order as one book. Download it, or save it into
+the folder as `book.pdf` — on request rather than on every render, since anything written
+into a synced folder is copied to all your devices.
+
+### What galley tells you about
+
+Notices along the bottom of the window name the file they came from. Two chapters defining
+the same link identifier differently, a figure reference that resolves nowhere, a `galley:`
+block it could not read, a chapter with no heading — all reported rather than left for you
+to find in the PDF.
 
 ## What galley supports
 
@@ -234,9 +406,16 @@ elsewhere and pasted in will do every time.
 The writing surface is a rich editor, but **Markdown is always the real document** — every
 edit is serialised straight back to it.
 
+In a **folder project** the same editor appears twice, side by side, so a chapter and the
+note you are writing it from can be open at once. One toolbar serves both and acts on
+whichever you last had the cursor in — it says which, by name and by an underline beneath
+its half. The controls that belong to a single document rather than to a selection —
+opening a file, clearing it — are not there, because the sidebar replaces them.
+
 - **Source view** — the `<>` button swaps the rich editor for the raw Markdown. Use it to
   paste, to check exactly what galley is working from, or if you simply prefer writing in
-  Markdown.
+  Markdown. It writes back exactly the bytes you typed, which is why a folder project
+  opens in it.
 - **Slash commands** — type `/` for headings, lists, quotes, code blocks, tables, links,
   maths and dividers.
 - **Table of contents** — the list button opens an overlay built from your headings,
@@ -249,7 +428,8 @@ edit is serialised straight back to it.
   drop or paste one in (PNG, JPEG, PDF). It is kept in this browser, previewed in place,
   and set as a captioned figure using the alt text. A PDF figure keeps a placeholder in
   the editor, since no browser can draw one in place, but it typesets normally.
-- **Help** — the `?` button lists every shortcut and slash command.
+- **Help** — **Help** in the bar above, or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd> + <kbd>/</kbd>.
+  Getting started, books and folders, every shortcut and every slash command.
 - **Clear the document** — the bin, far right and deliberately separated from the
   formatting tools. It asks first.
 
@@ -330,7 +510,9 @@ minimums are met.
 
 ## What you get out
 
-**Download .pdf** — the finished document.
+**Download .pdf** — the finished document. With a folder open you can also **save it into
+the folder** as `book.pdf`, on request rather than on every render, since anything written
+into a synced folder is copied to all your devices.
 
 **Download the source** — the LaTeX that produced it, always available, *including when the
 render fails*. That is deliberate: a failed compile must not leave you with nothing. The
@@ -369,6 +551,16 @@ unzip your-document.zip && xelatex your-document.tex
 - **A mixed list looks wrong in the editor.** A list mixing plain items and task items
   shows every item as a checkbox. The LaTeX and the PDF are correct; only the editor
   display is affected.
+- **Opening a folder needs Chrome or Edge on the desktop.** Firefox has declined to
+  implement the File System Access API and Safari has not shipped it. Single documents
+  work in any browser.
+- **The rich editor tidies formatting.** `_em_` becomes `*em*`, `* bullets` become
+  `- bullets`, an underlined heading becomes `#`, and a reference link is written inline
+  (its definition is kept). Nothing is lost and the PDF is identical, but in a folder
+  project it changes your file — which is why a project opens in source view, where no
+  such rewriting happens, and warns before the first rich-mode edit.
+- **Hyphenation is English-only.** The patterns are compiled into the engine's format
+  file, so no package can change it.
 - Very large documents are bounded by the 60-second compile ceiling.
 
 ## When a render fails

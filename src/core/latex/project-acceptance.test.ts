@@ -17,6 +17,8 @@ import { describe, expect, it } from 'vitest'
 import { presetFor } from '../config'
 import { buildFigureResolver, figureName } from '../project/figures'
 import { readProject } from '../project/read'
+import type { ProjectPart } from '../project/types'
+import { DEFAULT_PART } from '../structure'
 import { convert, convertProject } from './document'
 
 const CHAPTERS = [
@@ -276,5 +278,54 @@ describe('a project figure reaches the page under its resolved name', () => {
         file: 'chapters/03-illusion/chapter.md',
       }),
     )
+  })
+})
+
+/**
+ * The book-wide diagnostics have to REACH the caller.
+ *
+ * `sharedDefinitions` raises them, but it is `convertProject` that the UI
+ * calls, and nothing else in the suite crosses that seam — a mutation
+ * dropping `shared.diagnostics` from the returned array left every other test
+ * green. That is the shape of a fix that is perfectly correct and entirely
+ * inert.
+ */
+describe('convertProject — book-wide diagnostics', () => {
+  const part = (path: string, source: string): ProjectPart => ({
+    path,
+    source,
+    spec: DEFAULT_PART,
+  })
+
+  it('reports two chapters defining one identifier differently', () => {
+    const { diagnostics } = convertProject(
+      [
+        part('a.md', '# A\n\nSee [one][r].\n\n[r]: https://first.example\n'),
+        part('b.md', '# B\n\nSee [two][r].\n\n[r]: https://second.example\n'),
+      ],
+      presetFor('book'),
+    )
+    const clash = diagnostics.filter((d) => d.kind === 'project-definition-duplicate')
+    expect(clash).toHaveLength(1)
+    expect(clash[0]?.detail).toBe(
+      'a.md → https://first.example; b.md → https://second.example',
+    )
+  })
+
+  /**
+   * The absolute assertion beside it: the diagnostic is a NOTICE, not a change
+   * of behaviour. Last-wins is what a single concatenated document does, and
+   * the equivalence test above depends on it staying that way.
+   */
+  it('changes nothing about which target the links resolve to', () => {
+    const { tex } = convertProject(
+      [
+        part('a.md', '# A\n\nSee [one][r].\n\n[r]: https://first.example\n'),
+        part('b.md', '# B\n\nSee [two][r].\n\n[r]: https://second.example\n'),
+      ],
+      presetFor('book'),
+    )
+    expect(tex).not.toContain('first.example')
+    expect((tex.match(/second\.example/g) ?? []).length).toBeGreaterThan(0)
   })
 })

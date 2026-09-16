@@ -8,10 +8,14 @@ import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
 import Typography from '@tiptap/extension-typography'
 import StarterKit from '@tiptap/starter-kit'
+import { CodeBlockMeta } from './code-meta'
 import { Footnote } from './footnote'
+import { HtmlBlock, HtmlInline } from './html-passthrough'
 import { ImagePlaceholder } from './image'
+import { ImageInline } from './image-inline'
 import { ImagePrompt } from './image-prompt'
 import { LinkPrompt } from './link'
+import { LinkDefinition } from './link-definition'
 import { MathBlock } from './math-block'
 import { MathInline } from './math-inline'
 import { SlashCommand } from './slash-command'
@@ -54,8 +58,13 @@ export function createExtensions({ onRequestLink, onRequestImage }: EditorHandle
     Typography,
     MathInline,
     MathBlock,
+    CodeBlockMeta,
     Footnote,
+    HtmlBlock,
+    HtmlInline,
     ImagePlaceholder,
+    ImageInline,
+    LinkDefinition,
     SlashCommand,
     LinkPrompt.configure({ onRequest: onRequestLink ?? (() => {}) }),
     ImagePrompt.configure({ onRequest: onRequestImage ?? (() => {}) }),

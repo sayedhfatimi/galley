@@ -14,6 +14,8 @@
 import type { Root, Yaml } from 'mdast'
 import { parse as parseYaml } from 'yaml'
 import type { Metadata } from '../config'
+import { writeFrontmatterKey } from '../structure'
+import { parseMarkdown } from './parse'
 
 /** Keys accepted for each metadata field, in order of preference. */
 const FIELD_ALIASES = {
@@ -100,4 +102,40 @@ export function extractFrontmatter(tree: Root): Metadata {
  */
 export function hasFrontmatter(tree: Root): boolean {
   return firstYamlNode(tree) !== undefined
+}
+
+/**
+ * Write the book's title, subtitle, author and date back into its frontmatter.
+ *
+ * The counterpart to `extractFrontmatter`, and it did not exist:
+ * `writeBookConfig` writes only the `book:` key, while these four live as
+ * ordinary top-level keys. Without this, editing the title in Document setup
+ * had nowhere to go in a folder project — the field changed on screen and the
+ * file never heard about it.
+ *
+ * **Written back to the alias the file already uses.** `author`, `authors` and
+ * `by` all read as the author, and blindly writing `author:` into a file that
+ * says `authors:` leaves a stale key behind that still parses — the reader
+ * would then be looking at two different authors, with `extractFrontmatter`
+ * silently preferring the one they did not edit.
+ *
+ * Every write goes through `writeFrontmatterKey`, so other keys, their order
+ * and their comments survive, and a file whose frontmatter cannot be parsed is
+ * returned unchanged rather than rewritten.
+ */
+export function writeMetadata(source: string, metadata: Metadata): string {
+  let out = source
+  const existing = frontmatterData(parseMarkdown(source))
+
+  for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
+    const value = metadata[field as keyof Metadata]
+    // The alias this file already uses, falling back to the canonical name.
+    const key = aliases.find((alias) => existing?.[alias] !== undefined) ?? aliases[0]
+    // An empty field CLEARS the key rather than writing an empty string: a
+    // `title:` with nothing after it is not the same as no title, and the
+    // reader who cleared the box meant the second one.
+    out = writeFrontmatterKey(out, key, value && value.length > 0 ? value : null)
+  }
+
+  return out
 }

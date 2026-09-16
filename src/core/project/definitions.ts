@@ -19,12 +19,44 @@
  */
 
 import type { Definition, Nodes } from 'mdast'
+import { type Diagnostic, DiagnosticCollector } from '../diagnostics'
 import { parseMarkdown } from '../markdown/parse'
 
-export function sharedDefinitions(sources: readonly string[]): string {
-  const lines: string[] = []
+export interface DefinitionSource {
+  /** Project-relative, forward-slashed. Used only to name a file in a diagnostic. */
+  path: string
+  source: string
+}
 
-  for (const source of sources) {
+export interface SharedDefinitions {
+  /** The injected block, or `''` when there is nothing to inject. */
+  block: string
+  diagnostics: Diagnostic[]
+}
+
+export function sharedDefinitions(parts: readonly DefinitionSource[]): SharedDefinitions {
+  const lines: string[] = []
+  const diagnostics = new DiagnosticCollector()
+
+  /**
+   * The first file to define each identifier, and what it pointed at.
+   *
+   * A book-wide definition block means an identifier is book-wide too, and
+   * two chapters that each define `[1]` now silently share one target. That
+   * was impossible before folder projects and is ordinary in a book, where
+   * every chapter starts its references at 1.
+   */
+  const firstSeen = new Map<string, { url: string; path: string }>()
+
+  for (const { path, source } of parts) {
+    // Per FILE, and this set is the ONLY thing keeping a chapter that repeats
+    // its own identifier quiet — that was already legal in a single document
+    // and Markdown itself decides it, without galley's help or its opinion. A
+    // second `earlier.path !== path` guard was tried below and removed: this
+    // set makes it unreachable, and a check nothing can reach reads like a
+    // safeguard while being dead code.
+    const inThisFile = new Set<string>()
+
     const visit = (node: Nodes): void => {
       // Link definitions ONLY. A `definition` is a LEAF node; a
       // `footnoteDefinition` is a CONTAINER, and injecting one absorbs any
@@ -33,21 +65,40 @@ export function sharedDefinitions(sources: readonly string[]): string {
       if (node.type === 'definition') {
         const line = render(node)
         if (line !== null) lines.push(line)
+
+        if (!inThisFile.has(node.identifier)) {
+          inThisFile.add(node.identifier)
+          const earlier = firstSeen.get(node.identifier)
+          if (earlier === undefined) {
+            firstSeen.set(node.identifier, { url: node.url, path })
+          } else if (earlier.url !== node.url) {
+            // Only when the TARGETS differ. A book that defines `[isbn]` the
+            // same way in every chapter is doing nothing wrong, and saying so
+            // twenty-five times would bury the one that matters.
+            diagnostics.add(
+              'project-definition-duplicate',
+              `Two chapters define [${node.identifier}] differently, so both use the last one. Rename one of them.`,
+              `${earlier.path} → ${earlier.url}; ${path} → ${node.url}`,
+              path,
+            )
+          }
+        }
       }
       if ('children' in node) for (const child of node.children) visit(child as Nodes)
     }
     visit(parseMarkdown(source))
   }
 
-  const block = lines.join('\n')
-  if (block === '') return ''
+  const joined = lines.join('\n')
+  if (joined === '') return { block: '', diagnostics: diagnostics.list() }
 
   // Backstop for anything that only misbehaves once the lines sit together.
   // Each line already round-tripped alone; if the block as a whole does not
   // parse to definitions and nothing else, none of it is injected.
-  return parseMarkdown(block).children.every((child) => child.type === 'definition')
-    ? block
-    : ''
+  const safe = parseMarkdown(joined).children.every(
+    (child) => child.type === 'definition',
+  )
+  return { block: safe ? joined : '', diagnostics: diagnostics.list() }
 }
 
 /**
