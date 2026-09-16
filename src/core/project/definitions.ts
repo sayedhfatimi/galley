@@ -18,32 +18,43 @@
  * diagnosed, because an unresolved footnote reference parses as plain text.
  */
 
-import type { Nodes, Root } from 'mdast'
+import type { Definition, Nodes } from 'mdast'
 import { parseMarkdown } from '../markdown/parse'
 
 export function sharedDefinitions(sources: readonly string[]): string {
-  const blocks: string[] = []
+  const lines: string[] = []
 
   for (const source of sources) {
     const visit = (node: Nodes): void => {
       // Link definitions ONLY. A `definition` is a LEAF node; a
       // `footnoteDefinition` is a CONTAINER, and injecting one absorbs any
-      // following indented block as its own continuation. Measured: with
-      // `[^a]: note` injected at the top of a chapter whose body opens with an
-      // indented code block, that code block VANISHES from the chapter and is
-      // appended into the footnote's text — content silently moved between
-      // chapters, needing no malformed input at all. `[ref]: url` followed by
-      // the same indented block leaves it intact as a sibling.
-      if (node.type === 'definition') {
-        const start = node.position?.start.offset
-        const end = node.position?.end.offset
-        if (start !== undefined && end !== undefined)
-          blocks.push(source.slice(start, end))
-      }
+      // following indented block as its own continuation — measured: a
+      // chapter's code block vanished into another chapter's footnote.
+      if (node.type === 'definition') lines.push(render(node))
       if ('children' in node) for (const child of node.children) visit(child as Nodes)
     }
-    visit(parseMarkdown(source) as Root)
+    visit(parseMarkdown(source))
   }
 
-  return blocks.join('\n\n')
+  return lines.join('\n')
+}
+
+/**
+ * Rebuild a definition from the NODE, never from its source text.
+ *
+ * Slicing the source looks equivalent and is not: a definition written inside a
+ * container carries that container's markers on its continuation lines, and the
+ * slice takes them with it. Measured — `> [ref]: https://e.com` with a `> "A
+ * Title"` continuation slices to `[ref]: https://e.com\n> "A Title"`, which
+ * re-parses as a definition PLUS a stray blockquote, printing a spurious quote
+ * block at the top of every chapter in the book.
+ *
+ * Synthesising one line per definition makes that structurally impossible:
+ * there is no continuation line to carry anything.
+ */
+function render(node: Definition): string {
+  const label = node.label ?? node.identifier
+  const url = `<${node.url.replace(/[<>]/g, '')}>`
+  const title = node.title ? ` "${node.title.replace(/"/g, '\\"')}"` : ''
+  return `[${label}]: ${url}${title}`
 }
