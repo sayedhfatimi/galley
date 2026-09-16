@@ -70,6 +70,11 @@ describe('survives byte for byte', () => {
     ['an inline image', 'Text ![](fig.png) more\n'],
     ['an inline image with alt text', 'Text ![alt](fig.png) more\n'],
     ['an inline image with a title', 'Text ![a](f.png "T") more\n'],
+    ['a fenced block carrying meta', '```js title=x\ncode\n```\n'],
+    ['an HTML comment', '<!-- a comment -->\n'],
+    ['an Obsidian comment', '%%hidden%%\n'],
+    ['a wikilink to a heading', '[[note#Heading]]\n'],
+    ['a wikilink to a block', '[[note^block]]\n'],
   ])('keeps %s', (_name, source) => {
     expect(roundTrip(source)).toBe(source)
   })
@@ -220,6 +225,11 @@ describe('normalises formatting (accepted, and what rich mode warns about)', () 
       'a reference link into inline form',
       'A [reference][ref].\n\n[ref]: https://example.com/t\n',
       'A [reference](https://example.com/t).\n\n[ref]: https://example.com/t\n',
+    ],
+    [
+      'a reference-style image into inline form',
+      '![alt][ref]\n\n[ref]: fig.png\n',
+      '![alt](fig.png)\n\n[ref]: fig.png\n',
     ],
     [
       'a shortcut reference into inline form',

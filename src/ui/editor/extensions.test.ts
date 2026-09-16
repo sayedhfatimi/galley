@@ -45,6 +45,7 @@ describe('editor schema', () => {
     '[ref]: https://example.com',
     'A [reference][ref].\n\n[ref]: https://example.com/t',
     'Text ![inline](fig.png) more',
+    '```js title=x\ncode\n```',
   ])('accepts %j', (markdown) => {
     const doc = mdastToPm(parseMarkdown(markdown))
     expect(() => PMNode.fromJSON(schema, doc)).not.toThrow()
@@ -79,5 +80,20 @@ describe('editor schema', () => {
     walk(round)
     expect(found.length).toBeGreaterThan(0)
     expect(markdown).toContain(found[0])
+  })
+
+  /**
+   * A fence's `meta` has to survive the SCHEMA, not just the bridge.
+   * StarterKit's code block declares only `language`, so without the global
+   * attribute in `code-meta.ts` this is dropped here and nowhere else — the
+   * bridge tests would stay green while the editor still ate `title=x`.
+   */
+  it('carries a code fence meta back out of the schema', () => {
+    const doc = mdastToPm(parseMarkdown('```js title=x\ncode\n```'))
+    const round = PMNode.fromJSON(schema, doc).toJSON() as {
+      content?: { type?: string; attrs?: Record<string, unknown> }[]
+    }
+    const block = round.content?.find((n) => n.type === 'codeBlock')
+    expect(block?.attrs?.meta).toBe('title=x')
   })
 })

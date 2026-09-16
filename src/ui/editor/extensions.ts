@@ -8,6 +8,7 @@ import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
 import Typography from '@tiptap/extension-typography'
 import StarterKit from '@tiptap/starter-kit'
+import { CodeBlockMeta } from './code-meta'
 import { Footnote } from './footnote'
 import { HtmlBlock, HtmlInline } from './html-passthrough'
 import { ImagePlaceholder } from './image'
@@ -57,6 +58,7 @@ export function createExtensions({ onRequestLink, onRequestImage }: EditorHandle
     Typography,
     MathInline,
     MathBlock,
+    CodeBlockMeta,
     Footnote,
     HtmlBlock,
     HtmlInline,

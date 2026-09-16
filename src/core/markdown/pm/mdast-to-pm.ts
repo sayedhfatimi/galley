@@ -10,6 +10,7 @@ import type {
   Heading,
   Html,
   Image,
+  ImageReference,
   InlineCode,
   Link,
   LinkReference,
@@ -181,7 +182,10 @@ function blockquoteToPm(node: Blockquote): PMNode {
 function codeBlockToPm(node: Code): PMNode {
   return {
     type: 'codeBlock',
-    attrs: { language: node.lang ?? null },
+    // `meta` is whatever follows the language on the fence — `title=x`, a
+    // line range, a plugin's directive. galley does nothing with it, which is
+    // not a reason to strip it out of the author's file.
+    attrs: { language: node.lang ?? null, meta: node.meta ?? null },
     ...(node.value ? { content: [{ type: 'text', text: node.value }] } : {}),
   }
 }
@@ -348,6 +352,19 @@ function phrasingNodeToPm(node: PhrasingContent, marks: PMMark[]): PMNode[] | nu
           ...(inner.length > 0 ? { content: inner } : {}),
         },
       ]
+    }
+    // galley addition: a reference-style IMAGE is resolved the same way a
+    // reference link is. Without this it fell to `default: return null` and
+    // `![alt][ref]` disappeared from the author's file outright — not even
+    // the alt text survived. `latex/serialize.ts` has always handled it, so
+    // the picture reached the PDF while the editor deleted it.
+    case 'imageReference': {
+      const ref = node as unknown as ImageReference
+      const def = linkDefs.get(ref.identifier)
+      const attrs: Record<string, unknown> = { src: def?.url ?? ref.identifier }
+      if (ref.alt) attrs.alt = ref.alt
+      if (def?.title) attrs.title = def.title
+      return [{ type: 'imageInline', attrs, marks }]
     }
     // galley addition: reference links are RESOLVED here rather than modelled.
     // galley's serializer resolves them the same way, so the LaTeX is identical

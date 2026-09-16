@@ -159,10 +159,11 @@ function blockquoteFromPm(node: PMNode): Blockquote {
 function codeBlockFromPm(node: PMNode): Code {
   const text = (node.content ?? []).map((n) => n.text ?? '').join('')
   const lang = node.attrs?.language
+  const meta = node.attrs?.meta
   return {
     type: 'code',
     lang: typeof lang === 'string' && lang.length > 0 ? lang : null,
-    meta: null,
+    meta: typeof meta === 'string' && meta.length > 0 ? meta : null,
     value: text,
   }
 }
