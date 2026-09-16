@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { convertProject } from '@/core/latex/document'
+import { writeMetadata } from '@/core/markdown/frontmatter'
+import { writeBookConfig } from '@/core/project/config'
 import { buildFigureResolver } from '@/core/project/figures'
 import { fakeFs } from '@/ui/lib/fs/fakeHandle'
 import { buildFigureIndex } from './figures'
@@ -157,5 +159,55 @@ describe('a folder project, end to end', () => {
     const { tex } = await convert({})
     expect(tex).toContain('\\begin{document}')
     expect(tex).toContain('\\end{document}')
+  })
+})
+
+/**
+ * Changing the book's settings is an edit to `book.md`, and it has to REACH
+ * the file.
+ *
+ * `readProject` returns `book.md` as neither a part nor a note, so it is
+ * absent from `project` entirely — a shell reading it from the parts and
+ * notes found nothing, took that for "no book.md yet", and silently wrote
+ * nothing at all. Every unit test passed: the writer was correct, the config
+ * was correct, and they were never introduced.
+ */
+describe('settings reach book.md', () => {
+  const tree = {
+    'book.md': '---\ntitle: A Book\nauthors: A Writer\nbook:\n  typeface: pagella\n---\n',
+    'a.md': '---\ngalley:\n  role: main\n---\n\n# A\n',
+  }
+
+  it('writes both the book: block and the metadata, keeping the alias', async () => {
+    const fs = fakeFs(tree)
+    const session = await loadProject(fs.root)
+    expect(session.bookSource).not.toBeNull()
+
+    const next = {
+      ...session.config,
+      metadata: { ...session.config.metadata, author: 'Someone Else' },
+    }
+    const written = writeMetadata(
+      writeBookConfig(session.bookSource as string, next),
+      next.metadata,
+    )
+
+    expect(written).toContain('authors: Someone Else')
+    expect(written).not.toMatch(/\bauthor:/)
+    expect(written).toContain('typeface: pagella')
+    expect(written).toContain('title: A Book')
+  })
+
+  it('is a real change, so a write actually happens', async () => {
+    const session = await loadProject(fakeFs(tree).root)
+    const next = {
+      ...session.config,
+      metadata: { ...session.config.metadata, author: 'Someone Else' },
+    }
+    const written = writeMetadata(
+      writeBookConfig(session.bookSource as string, next),
+      next.metadata,
+    )
+    expect(written).not.toBe(session.bookSource)
   })
 })

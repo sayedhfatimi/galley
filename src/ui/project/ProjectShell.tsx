@@ -78,6 +78,7 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
   const setFileState = useStore((s) => s.setFileState)
   const setProject = useStore((s) => s.setProject)
   const setProjectConfig = useStore((s) => s.setProjectConfig)
+  const setBookSource = useStore((s) => s.setBookSource)
 
   const [mode, setMode] = useState<EditorMode>('source')
   const [richWarned, setRichWarned] = useState(false)
@@ -189,18 +190,24 @@ export function ProjectShell({ onOutput }: ProjectShellProps) {
   const changeConfig = useCallback(
     (next: GalleyConfig) => {
       setProjectConfig(next)
-      const current = sources.get(BOOK_FILE) ?? ''
+      // `book.md` is neither a part nor a note, so it is NOT in `sources` —
+      // it lives on the session. Reading it from `sources` meant every
+      // settings change silently did nothing, which is what a real edit in a
+      // browser found and no unit test could.
+      const current = session?.bookSource ?? ''
       const written = writeMetadata(writeBookConfig(current, next), next.metadata)
       if (written === current) return
-      if (!sources.has(BOOK_FILE)) {
-        // No `book.md` yet: hold it in memory so the conversion sees it, and
-        // let the reader create the file by choosing where it goes. Writing a
-        // file into someone's folder uninvited is not this control's business.
+
+      setBookSource(written)
+      if (session?.bookSource === null) {
+        // No `book.md` yet. Held in memory so the conversion sees the
+        // settings; creating a file in someone's folder uninvited is not this
+        // control's business.
         return
       }
-      edit(BOOK_FILE, written)
+      autosave.save(BOOK_FILE, written)
     },
-    [setProjectConfig, sources, edit],
+    [setProjectConfig, session, setBookSource, autosave],
   )
 
   useEffect(() => {

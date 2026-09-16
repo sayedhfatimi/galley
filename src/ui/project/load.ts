@@ -1,5 +1,5 @@
 import { type GalleyConfig, presetFor } from '@/core/config'
-import { readProject } from '@/core/project/read'
+import { BOOK_FILE, readProject } from '@/core/project/read'
 import { walkProject } from '@/ui/lib/fs/walk'
 import { type FileState, type ProjectSession, UNKNOWN_FILE } from '@/ui/lib/store'
 
@@ -48,6 +48,9 @@ export async function loadProject(
     handle,
     name: handle.name,
     project,
+    // Kept explicitly: `readProject` returns `book.md` as neither a part nor a
+    // note, so it is in `contents` and nowhere in `project`.
+    bookSource: contents.markdown.find((f) => f.path === BOOK_FILE)?.source ?? null,
     handles: contents.handles,
     config,
     files,

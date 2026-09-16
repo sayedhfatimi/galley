@@ -288,6 +288,7 @@ describe('project mode', () => {
       config: {},
       diagnostics: [],
     },
+    bookSource: null,
     handles: new Map(),
     config: { ...DEFAULT_CONFIG, character: 'book', typeface: 'pagella' },
     files: new Map(),

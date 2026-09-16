@@ -42,6 +42,15 @@ export interface ProjectSession {
   handle: FileSystemDirectoryHandle
   name: string
   project: Project
+  /**
+   * `book.md`'s own text, or null when the folder has none.
+   *
+   * Held here because `readProject` deliberately returns it as NEITHER a part
+   * nor a note — it is the book's settings, never a chapter of it — so it
+   * appears nowhere in `project`. Without it a settings change had no current
+   * source to write against and silently did nothing.
+   */
+  bookSource: string | null
   handles: Map<string, FileSystemFileHandle>
   config: GalleyConfig
   files: Map<string, FileState>
@@ -115,6 +124,7 @@ export interface GalleyStore {
   setLastFocused: (side: PaneSide) => void
   setFileState: (path: string, patch: Partial<FileState>) => void
   setProject: (project: Project) => void
+  setBookSource: (source: string) => void
 }
 
 /** A file galley has not read yet is not clean, it is simply unknown. */
@@ -324,6 +334,9 @@ export const useStore = create<GalleyStore>()(
 
       setProject: (project) =>
         set((s) => (s.session ? { session: { ...s.session, project } } : {})),
+
+      setBookSource: (bookSource) =>
+        set((s) => (s.session ? { session: { ...s.session, bookSource } } : {})),
     }),
     {
       name: 'galley',

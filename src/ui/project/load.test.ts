@@ -96,6 +96,28 @@ describe('loadProject', () => {
     expect(files.get('research.md')?.lastModified).toBeGreaterThan(0)
   })
 
+  /**
+   * `readProject` returns `book.md` as NEITHER a part nor a note — it is the
+   * book's settings, never a chapter of it — so it appears nowhere in
+   * `project` and the session has to hold it separately.
+   *
+   * Without this, a settings change had no current source to write against
+   * and silently did nothing: the field moved on screen and the file never
+   * heard. Found by editing the author in a browser, and invisible to every
+   * unit test because each half was correct.
+   */
+  it('keeps book.md’s own text, which appears nowhere in the project', async () => {
+    const { bookSource, project } = await loadProject(fakeFs(book).root)
+    expect(bookSource).toContain('title: The Illusion')
+    expect(project.parts.map((p) => p.path)).not.toContain('book.md')
+    expect(project.notes.map((n) => n.path)).not.toContain('book.md')
+  })
+
+  it('has no book source when the folder has no book.md', async () => {
+    const { bookSource } = await loadProject(fakeFs({ 'a.md': '# A\n' }).root)
+    expect(bookSource).toBeNull()
+  })
+
   it('starts every file clean and unconflicted', async () => {
     const { files } = await loadProject(fakeFs(book).root)
     for (const state of files.values()) {
